@@ -1,11 +1,12 @@
 package com.litecharts.app.chart
 
 import android.graphics.Color
+import com.tradingview.lightweightcharts.api.chart.models.color.IntColor
+import com.tradingview.lightweightcharts.api.chart.models.color.surface.SolidColor
+import com.tradingview.lightweightcharts.api.chart.models.color.toIntColor
 import com.tradingview.lightweightcharts.api.interfaces.ChartApi
 import com.tradingview.lightweightcharts.api.interfaces.SeriesApi
 import com.tradingview.lightweightcharts.api.options.models.*
-import com.tradingview.lightweightcharts.api.chart.models.color.IntColor
-import com.tradingview.lightweightcharts.api.chart.models.color.surface.SolidColor
 import com.tradingview.lightweightcharts.api.series.enums.CrosshairMode
 import com.tradingview.lightweightcharts.api.series.enums.LineWidth
 import com.tradingview.lightweightcharts.api.series.enums.SeriesMarkerPosition
@@ -44,37 +45,32 @@ class ChartManager(private val chartsView: ChartsView) {
     // ── Init ───────────────────────────────────────────────────
 
     fun initialize(onReady: () -> Unit) {
-        // Wait for the internal WebView / chart bridge to be ready
-        chartsView.subscribeOnChartStateChange { state ->
-            if (state == ChartsView.State.READY) {
-                applyDarkTheme()
-                createCandleSeries(onReady)
-            }
-        }
+        applyDarkTheme()
+        createCandleSeries(onReady)
     }
 
     private fun applyDarkTheme() {
         chartsView.api.applyOptions {
             layout = layoutOptions {
-                background = SolidColor(IntColor(Color.parseColor("#0D1117")))
-                textColor = IntColor(Color.parseColor("#8B949E"))
+                background = SolidColor(Color.parseColor("#0D1117").toIntColor())
+                textColor = Color.parseColor("#8B949E").toIntColor()
                 fontSize = 11f
             }
             grid = gridOptions {
-                vertLines = gridLineOptions { color = IntColor(Color.parseColor("#161B22")) }
-                horzLines = gridLineOptions { color = IntColor(Color.parseColor("#161B22")) }
+                vertLines = gridLineOptions { color = Color.parseColor("#161B22").toIntColor() }
+                horzLines = gridLineOptions { color = Color.parseColor("#161B22").toIntColor() }
             }
             crosshair = crosshairOptions {
                 mode = CrosshairMode.NORMAL
             }
             timeScale = timeScaleOptions {
-                borderColor = IntColor(Color.parseColor("#21262D"))
+                borderColor = Color.parseColor("#21262D").toIntColor()
                 timeVisible = true
                 secondsVisible = false
                 rightOffset = 5f
             }
             rightPriceScale = priceScaleOptions {
-                borderColor = IntColor(Color.parseColor("#21262D"))
+                borderColor = Color.parseColor("#21262D").toIntColor()
                 scaleMargins = priceScaleMargins {
                     top = 0.1f
                     bottom = 0.1f
@@ -96,12 +92,12 @@ class ChartManager(private val chartsView: ChartsView) {
     private fun createCandleSeries(onReady: () -> Unit) {
         chartsView.api.addCandlestickSeries(
             options = CandlestickSeriesOptions().apply {
-                upColor       = IntColor(Color.parseColor("#26A69A"))
-                downColor     = IntColor(Color.parseColor("#EF5350"))
-                borderUpColor = IntColor(Color.parseColor("#26A69A"))
-                borderDownColor = IntColor(Color.parseColor("#EF5350"))
-                wickUpColor   = IntColor(Color.parseColor("#26A69A"))
-                wickDownColor = IntColor(Color.parseColor("#EF5350"))
+                upColor         = Color.parseColor("#26A69A").toIntColor()
+                downColor       = Color.parseColor("#EF5350").toIntColor()
+                borderUpColor   = Color.parseColor("#26A69A").toIntColor()
+                borderDownColor = Color.parseColor("#EF5350").toIntColor()
+                wickUpColor     = Color.parseColor("#26A69A").toIntColor()
+                wickDownColor   = Color.parseColor("#EF5350").toIntColor()
             },
             onSeriesCreated = { api ->
                 candleSeries = api
@@ -137,7 +133,7 @@ class ChartManager(private val chartsView: ChartsView) {
         result.lines.forEach { line ->
             chartsView.api.addLineSeries(
                 options = LineSeriesOptions().apply {
-                    color = IntColor(Color.parseColor(line.color))
+                    color = Color.parseColor(line.color).toIntColor()
                     lineWidth = when (line.lineWidth) {
                         1 -> LineWidth.ONE; 2 -> LineWidth.TWO; 3 -> LineWidth.THREE
                         else -> LineWidth.ONE
@@ -165,7 +161,7 @@ class ChartManager(private val chartsView: ChartsView) {
                         DccIndicatorEngine.MarkerPosition.ABOVE -> SeriesMarkerPosition.ABOVE_BAR
                         DccIndicatorEngine.MarkerPosition.BELOW -> SeriesMarkerPosition.BELOW_BAR
                     },
-                    color = IntColor(Color.parseColor(m.color)),
+                    color = Color.parseColor(m.color).toIntColor(),
                     shape = when (m.shape) {
                         DccIndicatorEngine.MarkerShape.CIRCLE     -> SeriesMarkerShape.CIRCLE
                         DccIndicatorEngine.MarkerShape.ARROW_UP   -> SeriesMarkerShape.ARROW_UP
@@ -187,12 +183,6 @@ class ChartManager(private val chartsView: ChartsView) {
 
     // ── Coordinate mapping for the drawing overlay ─────────────
 
-    /**
-     * Subscribe to visible time-range changes.  Each time the user pans/zooms
-     * we re-query price bounds via the async WebView bridge and publish a
-     * [CoordinateMapping] that the [DrawingOverlayView] uses for all
-     * price↔pixel and time↔pixel conversions.
-     */
     private fun subscribeVisibleRange() {
         chartsView.api.timeScale.subscribeVisibleTimeRangeChange { range ->
             if (range == null) {
@@ -208,16 +198,15 @@ class ChartManager(private val chartsView: ChartsView) {
             val h = chartsView.height
             if (w == 0 || h == 0) return@subscribeVisibleTimeRangeChange
 
-            // Async bridge: query the price at top (y=0) and bottom (y=height)
             candleSeries?.coordinateToPrice(0f) { topPrice ->
                 candleSeries?.coordinateToPrice(h.toFloat()) { bottomPrice ->
                     if (topPrice != null && bottomPrice != null) {
                         val mapping = CoordinateMapping(
-                            timeFrom   = from,
-                            timeTo     = to,
-                            priceTop   = topPrice.toDouble(),
+                            timeFrom    = from,
+                            timeTo      = to,
+                            priceTop    = topPrice.toDouble(),
                             priceBottom = bottomPrice.toDouble(),
-                            chartWidth = w,
+                            chartWidth  = w,
                             chartHeight = h
                         )
                         currentMapping = mapping
@@ -227,11 +216,6 @@ class ChartManager(private val chartsView: ChartsView) {
             }
         }
     }
-
-    // ── Utility coordinate converters (synchronous, linear) ───
-    // These use the last published mapping for instant screen↔chart math.
-    // They are intentionally linear interpolations — good enough for most
-    // chart zoom levels and much faster than round-tripping through JS.
 
     fun priceToY(price: Double, m: CoordinateMapping): Float {
         val range = m.priceTop - m.priceBottom
@@ -255,5 +239,5 @@ class ChartManager(private val chartsView: ChartsView) {
         return m.timeFrom + (x / m.chartWidth * range).toLong()
     }
 
-    fun destroy() { /* ChartsView handles WebView cleanup internally */ }
+    fun destroy() { }
 }
