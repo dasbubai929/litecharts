@@ -21,14 +21,17 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
       - name: Configure local.properties with OANDA API Key
         run: |
           echo "OANDA_API_KEY=${{ secrets.OANDA_API_KEY || 'af2cbf06afafb47fde5549338fffa54e-938b48b11be124229f8a5435d3fae0fc' }}" > local.properties
+
+      - name: Accept Android SDK licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
