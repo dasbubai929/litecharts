@@ -107,26 +107,30 @@ To update or change it at any time, edit `local.properties` in the root folder.
 
 ---
 
-## How to Paste Your DCC Pine Script Logic
+## Modular DCC Indicator Engine (`DccIndicatorEngine.kt`)
 
-Open `app/src/main/java/com/litecharts/app/indicator/DccIndicatorEngine.kt`:
+Fully translated from **DCC Strategy v2.5.5 (`DCC+TSM+VPSR+SQZ`)**:
 
-1. Locate the `calculate(candles: List<OandaCandle>): IndicatorResult` method.
-2. Replace the placeholder math between:
-   ```kotlin
-   // ═══════════════════════════════════════════════════════
-   //  PLACEHOLDER — replace with your DCC Pine Script math
-   // ═══════════════════════════════════════════════════════
-   ```
-   with your translated logic.
-3. Use the built-in TA helpers already included in the class:
-   - `ema(data, period)`
-   - `sma(data, period)`
-   - `rsi(data, period)`
-   - `atr(highs, lows, closes, period)`
-4. Return an `IndicatorResult(lines, markers)` where:
-   - `lines`: `List<LineSeries>` with `LinePoint(time, value)`
-   - `markers`: `List<SignalMarker>` (`ARROW_UP`, `ARROW_DOWN`, etc.)
+1. **01 • EMA / Trend**:
+   - Fast EMA (period: 9, color: `#B37D13`)
+   - Slow EMA (period: 21, color: `#1E4D6B`)
+2. **02 • VWAP**:
+   - Daily Anchored VWAP (source: `(H+L+C)/3`, color: `#6D4C7D`) resets automatically at 00:00 UTC each day.
+3. **03 • HTF EMA 1 & Bias**:
+   - H1 HTF EMA (length: 21, smoothed approximation) driving live market BIAS (`LONG`, `SHORT`, or `FLAT`).
+4. **04 & 05 • DMI / ADX & Stop Loss**:
+   - Directional Movement Index with 14-period Wilder's RMA ADX.
+   - Dynamic Risk / Live Stop Loss level based on `0.9 × ATR(14)`.
+5. **10 • Trend Strength Matrix (TSM)**:
+   - Multi-factor composite trend score combining normalized RSI(14), MACD(12,26,9), ADX direction/strength, and 50-period SMA weight.
+   - Displays percentage and strong trend flag (`★` when `|TSM| ≥ 50%`).
+6. **11 & 12 • Signals & Markers**:
+   - `❌` Crossover Markers: Bullish (`#4F7965`) and Bearish (`#A35C62`) plotted directly on candles.
+   - Pullback Swing Entry Signals: `PB BUY` (triangle up) and `PB SELL` (triangle down) following EMA touch and breakout confirmation.
+   - P3 Re-Entry Signals: `P3 BUY` (`#00B0FF`) and `P3 SELL` (`#FF6D00`) for trend continuation.
+7. **15 & 16 • Squeeze Index (SQZ) & Live Table HUD**:
+   - Tracks convergence/divergence compression `psi` with states `COMP` (Compression), `REL` (Release), and `IDLE`.
+   - Compact top HUD banner renders live metrics (`BIAS`, `ADX`, `TSM`, `SL`, and `SQZ`).
 
 ---
 

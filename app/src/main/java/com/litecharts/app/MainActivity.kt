@@ -97,8 +97,12 @@ class MainActivity : AppCompatActivity() {
 
         b.switchDcc.setOnCheckedChangeListener { _, on ->
             dccEnabled = on
-            if (on && currentCandles.isNotEmpty()) applyDcc()
-            else chart.clearIndicators()
+            if (on && currentCandles.isNotEmpty()) {
+                applyDcc()
+            } else {
+                b.dccTableHud.visibility = View.GONE
+                chart.clearIndicators()
+            }
         }
     }
 
@@ -236,8 +240,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun applyDcc() =
-        chart.setIndicator(DccIndicatorEngine.calculate(currentCandles))
+    private fun applyDcc() {
+        val result = DccIndicatorEngine.calculate(currentCandles)
+        chart.setIndicator(result)
+
+        val td = result.tableData
+        if (td != null) {
+            b.dccTableHud.visibility = View.VISIBLE
+            b.tvDccBias.text = "BIAS: ${td.bias}"
+            b.tvDccBias.setTextColor(c(td.biasColor))
+            b.tvDccAdx.text = "· ADX %.1f".format(td.adx)
+            b.tvDccTsm.text = td.tsmStripText
+            b.tvDccSl.text = td.slText
+            b.tvDccSqz.text = "SQZ ${td.sqzState}"
+            b.tvDccSqz.setTextColor(c(td.sqzColor))
+        } else {
+            b.dccTableHud.visibility = View.GONE
+        }
+    }
 
     // ── Helpers ────────────────────────────────────────────────
     private fun c(hex: String) = Color.parseColor(hex)
