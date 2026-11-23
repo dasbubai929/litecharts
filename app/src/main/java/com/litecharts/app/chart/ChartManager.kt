@@ -54,7 +54,7 @@ class ChartManager(private val chartsView: ChartsView) {
             layout = layoutOptions {
                 background = SolidColor(Color.parseColor("#0D1117").toIntColor())
                 textColor = Color.parseColor("#8B949E").toIntColor()
-                fontSize = 11f
+                fontSize = 11
             }
             grid = gridOptions {
                 vertLines = gridLineOptions { color = Color.parseColor("#161B22").toIntColor() }
