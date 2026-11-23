@@ -1,0 +1,6 @@
+# Android SDK path (adjust to your local environment)
+# sdk.dir=C\:\\Users\\user\\AppData\\Local\\Android\\Sdk
+
+# OANDA API Key (v3 Practice API)
+# Get your token from https://fxtrade.oanda.com
+OANDA_API_KEY=YOUR_OANDA_API_KEY_HERE

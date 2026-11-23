@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_primary">
+
+    <!-- ═══ Top bar: Market selector + Timeframes + DCC toggle ═══ -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="4dp"
+        android:paddingVertical="2dp"
+        android:background="@color/bg_secondary"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- Market button -->
+        <Button
+            android:id="@+id/btnMarketSelector"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:text="EUR/USD"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:minWidth="0dp"
+            android:paddingHorizontal="8dp" />
+
+        <!-- Timeframe scroll strip -->
+        <HorizontalScrollView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:scrollbars="none"
+            android:fadingEdge="horizontal"
+            android:fadingEdgeLength="12dp"
+            android:requiresFadingEdge="horizontal">
+
+            <LinearLayout
+                android:id="@+id/timeframeContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingHorizontal="2dp" />
+        </HorizontalScrollView>
+
+        <!-- DCC indicator toggle -->
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switchDcc"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="DCC"
+            android:textColor="@color/text_secondary"
+            android:textSize="10sp"
+            android:checked="false"
+            android:minWidth="0dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="4dp" />
+    </LinearLayout>
+
+    <!-- ═══ Chart + Drawing overlay ═══ -->
+    <FrameLayout
+        android:id="@+id/chartContainer"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toBottomOf="@id/topBar"
+        app:layout_constraintBottom_toTopOf="@id/drawingToolbar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- Chart (ChartsView from TradingView lib OR fallback WebView) -->
+        <com.tradingview.lightweightcharts.view.ChartsView
+            android:id="@+id/chartsView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Touch-synced drawing overlay -->
+        <com.litecharts.app.drawing.DrawingOverlayView
+            android:id="@+id/drawingOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Loading spinner -->
+        <ProgressBar
+            android:id="@+id/loadingIndicator"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_gravity="center"
+            android:visibility="gone"
+            android:indeterminateTint="@color/accent_blue" />
+
+        <!-- Error / status text -->
+        <TextView
+            android:id="@+id/tvError"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:textColor="@color/accent_red"
+            android:textSize="13sp"
+            android:gravity="center"
+            android:padding="24dp"
+            android:visibility="gone" />
+
+        <!-- Drawing mode hint -->
+        <TextView
+            android:id="@+id/tvDrawingHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/accent_blue"
+            android:textSize="11sp"
+            android:background="@color/bg_secondary"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="3dp"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <!-- ═══ Drawing toolbar ═══ -->
+    <HorizontalScrollView
+        android:id="@+id/drawingToolbar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="@color/bg_secondary"
+        android:scrollbars="none"
+        android:fadingEdge="horizontal"
+        android:fadingEdgeLength="16dp"
+        android:requiresFadingEdge="horizontal"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:id="@+id/drawingToolsContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="4dp" />
+    </HorizontalScrollView>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
