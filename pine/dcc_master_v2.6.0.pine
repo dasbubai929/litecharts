@@ -1,0 +1,1271 @@
+//@version=6
+// This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// DCC Strategy (c dasmrittun929 / DC Capital) - v2.6.0 (Performance Optimized)
+//
+// PERF NOTES
+//  • calc_bars_count 5000 -> 2500 (raise only if you truly need deeper history)
+//  • TSM: 6 request.security() calls -> 3 (live + "last closed" from ONE evaluation per TF)
+//  • Daily data: 4 request.security() calls -> 1
+//  • Session boxes: 6 border lines per session replaced by the box's own dotted border
+//  • Volume Profile: one histogram per bar shared by BOTH pivots (was computed twice)
+//  • All str.tostring() work moved inside barstate.islast (was running on every bar)
+//  • Last-bar volume profile redraws once per bar instead of on every realtime tick
+
+indicator("DCC+TSM+VPSR+SQZ", shorttitle="DCC Master", overlay=true, max_boxes_count=500, max_labels_count=200, max_lines_count=100, calc_bars_count=2500)
+
+// =====================================================================================================================
+// 01 • EMA / TREND
+// =====================================================================================================================
+grpEMA      = "01 • EMA / Trend"
+enableEMA   = input.bool(true, "Enable Chart EMAs (Master Switch)", group=grpEMA)
+showFastEma = input.bool(true, "Show Fast EMA", group=grpEMA)
+fastLen     = input.int(9, "Fast EMA Length", minval=1, group=grpEMA)
+fastSource  = input.source(close, "Fast EMA Source", group=grpEMA)
+
+showSlowEma = input.bool(true, "Show Slow EMA", group=grpEMA)
+slowLen     = input.int(21, "Slow EMA Length", minval=1, group=grpEMA)
+slowSource  = input.source(close, "Slow EMA Source", group=grpEMA)
+
+// =====================================================================================================================
+// 02 • VWAP (DAILY OR SESSION ANCHORED — OVERLAP SAFE)
+// =====================================================================================================================
+grpVWAP    = "02 • VWAP"
+enableVwap = input.bool(true, "Enable VWAP (Master Switch)", group=grpVWAP)
+vwapMode   = input.string("Daily", "VWAP Anchor Mode", options=["Daily", "Sessions"], group=grpVWAP, tooltip="Daily resets VWAP at the start of each trading day. Sessions tracks independent VWAP accumulators for each enabled session in Group 07 and displays the most recently opened active session.")
+vwapSource = input.source(hlc3, "VWAP Source", group=grpVWAP)
+
+// =====================================================================================================================
+// 03 • HTF EMA LEVEL & BIAS
+// =====================================================================================================================
+grpHTFEMA         = "03 • HTF EMA Level (Drives Bias & SL)"
+enableHTFEMA      = input.bool(true, "Enable HTF EMA 1 (Master Switch)", group=grpHTFEMA)
+htfEmaTF          = input.timeframe("60", "HTF EMA 1 Timeframe", group=grpHTFEMA)
+htfEmaLen1        = input.int(21, "HTF EMA 1 Length", minval=1, group=grpHTFEMA)
+htfEmaSource1     = input.source(close, "HTF EMA 1 Source", group=grpHTFEMA)
+htfEmaDisplayMode = input.string("Smoothed Approximation", "HTF EMA Display Mode", options=["Actual HTF EMA", "Smoothed Approximation"], group=grpHTFEMA)
+
+// =====================================================================================================================
+// 04 • ADX
+// =====================================================================================================================
+grpADX    = "04 • ADX"
+enableADX = input.bool(true, "Enable ADX (Master Switch)", group=grpADX)
+adxTF     = input.timeframe("60", "ADX Timeframe", group=grpADX)
+adxLen    = input.int(14, "ADX DI Length", minval=1, group=grpADX)
+adxSmooth = input.int(14, "ADX Smoothing", minval=1, group=grpADX)
+
+// =====================================================================================================================
+// 05 • ATR / RISK (STOP LOSS)
+// =====================================================================================================================
+grpRisk    = "05 • ATR / Risk"
+enableATR  = input.bool(true, "Enable ATR Stop Loss (Master Switch)", group=grpRisk)
+atrTF      = input.timeframe("60", "ATR Timeframe", group=grpRisk)
+atrLen     = input.int(14, "ATR Length", minval=1, group=grpRisk)
+atrMult    = input.float(0.9, "ATR × Stop Loss", minval=0.0, step=0.1, group=grpRisk)
+showLiveSL = input.bool(true, "Show Live SL Price", group=grpRisk)
+
+// =====================================================================================================================
+// 06 • DISPLAY & TABLE
+// =====================================================================================================================
+grpDisp       = "06 • Display & Table"
+showTable     = input.bool(true, "Enable DCC Table (Master Switch)", group=grpDisp)
+tablePosInput = input.string("Bottom Center", "DCC Table Position", options=["Top Left", "Top Center", "Top Right", "Middle Left", "Middle Right", "Bottom Left", "Bottom Center", "Bottom Right"], group=grpDisp)
+tblTextInput  = input.string("Tiny", "DCC Table Text Size", options=["Tiny", "Small", "Normal"], group=grpDisp)
+
+// =====================================================================================================================
+// 07 • TRADING SESSIONS
+// =====================================================================================================================
+grpSess        = "07 • Trading Sessions"
+enableSessions = input.bool(true, "Enable Trading Sessions (Master Switch)", group=grpSess)
+
+enableTokyo   = input.bool(true, "Tokyo", group=grpSess, inline="tokyo")
+tokyoName     = input.string("Tokyo", "", group=grpSess, inline="tokyo")
+tokyoTime     = input.session("0900-1800", "Tokyo Hours", group=grpSess)
+
+enableLondon  = input.bool(true, "London", group=grpSess, inline="london")
+londonName    = input.string("London", "", group=grpSess, inline="london")
+londonTime    = input.session("0800-1700", "London Hours", group=grpSess)
+londonAutoDST = input.bool(true, "London Auto DST", group=grpSess)
+
+enableNY      = input.bool(true, "New York", group=grpSess, inline="ny")
+nyName        = input.string("New York", "", group=grpSess, inline="ny")
+nyTime        = input.session("0800-1700", "New York Hours", group=grpSess)
+nyAutoDST     = input.bool(true, "New York Auto DST", group=grpSess)
+
+enableSydney  = input.bool(true, "Sydney", group=grpSess, inline="sydney")
+sydneyName    = input.string("Sydney", "", group=grpSess, inline="sydney")
+sydneyTime    = input.session("0800-1700", "Sydney Hours", group=grpSess)
+sydneyAutoDST = input.bool(true, "Sydney Auto DST", group=grpSess)
+
+// =====================================================================================================================
+// 08 • SESSION RANGE BOXES
+// =====================================================================================================================
+grpRange          = "08 • Session Range Boxes"
+enableRangeBoxes  = input.bool(true, "Enable Session Range Boxes (Master Switch)", group=grpRange)
+rangeTransparency = input.int(95, "Range Fill Transparency", minval=0, maxval=100, group=grpRange)
+showRangeLabel    = input.bool(true, "Range Box Centered Label", group=grpRange)
+showRangeOutline  = input.bool(true, "Show Session Outline", group=grpRange)
+outlineTransp     = input.int(75, "Outline Transparency", minval=0, maxval=100, group=grpRange)
+sessHistLimit     = input.int(15, "Session History Limit (per session)", minval=1, maxval=100, group=grpRange)
+
+// =====================================================================================================================
+// 09 • KEY LEVELS & LABELS — PDH / PDL / DAILY OPEN
+// =====================================================================================================================
+grpKL         = "09 • Key Levels & Labels"
+enableLevels  = input.bool(true, "Enable Key Levels (Master Switch)", group=grpKL)
+showDailyOpen = input.bool(true, "Show Daily Open (DO)", group=grpKL)
+styDO         = input.string("Dotted", "DO Style / Width", options=["Solid", "Dashed", "Dotted"], inline="do", group=grpKL)
+widDO         = input.int(1, "", minval=1, maxval=4, inline="do", group=grpKL)
+
+showPDLvl     = input.bool(true, "Show Prev Day Levels (PDH / PDL)", group=grpKL)
+styPDLvl      = input.string("Dotted", "PDH/PDL Style / Width", options=["Solid", "Dashed", "Dotted"], inline="pd", group=grpKL)
+widPDLvl      = input.int(1, "", minval=1, maxval=4, inline="pd", group=grpKL)
+
+labOffset     = input.int(4, "Label Distance from Last Candle (bars)", minval=0, maxval=50, group=grpKL)
+labSpacing    = input.int(14, "Gap Between Staggered Labels (bars)", minval=4, maxval=60, group=grpKL)
+labTolATR     = input.float(0.5, "Label Collision Tolerance (x ATR)", minval=0.05, maxval=2.0, step=0.05, group=grpKL)
+labSolid      = input.bool(true, "Solid Background Behind Labels", group=grpKL)
+
+// =====================================================================================================================
+// 10 • TREND STRENGTH MATRIX (HTF ONLY)
+// =====================================================================================================================
+grpTSM          = "10 • Trend Strength Matrix (TSM)"
+enableTSM       = input.bool(true, "Enable Trend Strength Matrix (Master Switch)", group=grpTSM)
+tsmDisplayMode  = input.string("Compact DCC Table Row", "TSM Display Mode", options=["Compact DCC Table Row", "Full Mobile TSM Table"], group=grpTSM)
+tsmDashPos      = input.string("Top Right", "Full Table Position", options=["Top Left", "Top Center", "Top Right", "Middle Left", "Middle Right", "Bottom Left", "Bottom Center", "Bottom Right"], group=grpTSM)
+tsmConfirmMode  = input.string("Live HTF", "TSM HTF Confirmation Mode", options=["Live HTF", "Last Closed HTF"], group=grpTSM)
+tsmTf1          = input.timeframe("60", "HTF 1", group=grpTSM)
+tsmTf2          = input.timeframe("240", "HTF 2", group=grpTSM)
+tsmTf3          = input.timeframe("1D", "HTF 3", group=grpTSM)
+tsmMinStrength  = input.float(50.0, "Strong Trend Highlight Threshold (%)", minval=0.0, maxval=100.0, step=1.0, group=grpTSM)
+tsmRsiLength    = input.int(14, "RSI Length", minval=5, maxval=30, group=grpTSM)
+tsmMacdFast     = input.int(12, "MACD Fast", minval=5, maxval=30, group=grpTSM)
+tsmMacdSlow     = input.int(26, "MACD Slow", minval=10, maxval=50, group=grpTSM)
+tsmMacdSignal   = input.int(9, "MACD Signal", minval=3, maxval=20, group=grpTSM)
+tsmAdxLength    = input.int(14, "ADX Length", minval=5, maxval=30, group=grpTSM)
+tsmMaLength     = input.int(50, "MA Length", minval=20, maxval=200, group=grpTSM)
+
+// =====================================================================================================================
+// 11 • EMA CROSSOVER MARKERS (❌) & CONFLUENCE FILTERS
+// =====================================================================================================================
+grpCross             = "11 • EMA Crossover Markers (❌)"
+showCrossMarkers     = input.bool(true, "Show EMA Crossover Markers (❌)", group=grpCross)
+crossUseVwap         = input.bool(false, "Filter ❌ by VWAP Confluence", group=grpCross)
+crossUseHtfEma       = input.bool(false, "Filter ❌ by HTF EMA 1 (Bias)", group=grpCross)
+crossUseAdx          = input.bool(false, "Filter ❌ by ADX Min Threshold", group=grpCross)
+crossUseTsm          = input.bool(false, "Filter ❌ by TSM Min Score", group=grpCross)
+crossUseTsmAllAlign  = input.bool(false, "Filter ❌ by All TSM Timeframes Aligned", group=grpCross)
+
+// =====================================================================================================================
+// 12 • PULLBACK & P3 RE-ENTRY SIGNALS + ENTRY CONFLUENCE
+// =====================================================================================================================
+grpSig               = "12 • Pullback & P3 Entry Signals"
+enablePullbackEntry  = input.bool(true, "Enable Post-Cross Pullback Entry Signals", group=grpSig)
+tiePbToValidCross    = input.bool(true, "Tie Pullback Entry to Valid Crossover (❌)", group=grpSig)
+pbTargetEma          = input.string("Fast EMA", "Pullback Target EMA", options=["Fast EMA", "Slow EMA"], group=grpSig)
+pbTouchMode          = input.string("Wick or Close Touch", "Pullback Touch Condition", options=["Wick or Close Touch", "Close Touch / Cross"], group=grpSig)
+pbBreakTrigger       = input.string("Candle Close", "Breakout Confirmation Mode", options=["Candle Close", "Intrabar Wick/Price"], group=grpSig)
+showPbLines          = input.bool(true, "Show Pullback Swing High/Low Lines", group=grpSig)
+showHistPbLines      = input.bool(false, "Show Historical Pullback Lines (Off = Live Only)", group=grpSig, tooltip="When enabled, keeps all past completed/expired pullback lines on the chart.")
+
+enableP3ReEntry      = input.bool(false, "Enable Pullback P3 Re-Entry Setup", group=grpSig)
+tieP3ToValidCross    = input.bool(true, "Tie P3 Re-Entry to Valid Crossover (❌)", group=grpSig)
+p3BreakoutBars       = input.int(3, "P3 Max Candles for High/Low Break", minval=1, maxval=10, group=grpSig)
+p3MinDistBars        = input.int(10, "P3 Min Distance Between Re-Entries (bars)", minval=1, maxval=100, group=grpSig)
+
+sigUseVwap           = input.bool(true, "Entry: Require VWAP Confluence", group=grpSig)
+sigUseHtfEma         = input.bool(false, "Entry: Require HTF EMA 1 (Bias) Confluence", group=grpSig)
+sigUseAdx            = input.bool(false, "Entry: Require ADX Min Threshold", group=grpSig, inline="sigAdx")
+sigMinAdx            = input.float(20.0, "", minval=0.0, maxval=100.0, step=1.0, group=grpSig, inline="sigAdx")
+sigUseTsm            = input.bool(false, "Entry: Require TSM Min Score (%)", group=grpSig, inline="sigTsm")
+sigMinTsmScore       = input.float(20.0, "", minval=0.0, maxval=100.0, step=1.0, group=grpSig, inline="sigTsm")
+sigTsmAllAligned     = input.bool(false, "Entry: Require All TSM Timeframes Aligned", group=grpSig)
+
+// =====================================================================================================================
+// 13 • VOLUME PROFILE (M5 TUNED)
+// =====================================================================================================================
+grpVP       = "13 • Large Rolling Volume Profile"
+enableVP    = input.bool(true, "Enable Volume Profile (Master Switch)", group=grpVP)
+profLb      = input.int(360, "Lookback", minval=100, maxval=1500, group=grpVP, inline="vp1", tooltip="Tuned for M5 (~30 hours)")
+profRows    = input.int(72, "Rows", minval=24, maxval=100, group=grpVP, inline="vp1")
+profW       = input.int(45, "Width", minval=15, maxval=110, group=grpVP, inline="vp2")
+profOff     = input.int(8, "Offset", minval=2, maxval=50, group=grpVP, inline="vp2")
+showPoc     = input.bool(true, "Show POC", group=grpVP, inline="vp3")
+showLvlRows = input.bool(true, "Highlight Level Rows", group=grpVP, inline="vp3")
+
+// =====================================================================================================================
+// 14 • PROFILE-GUIDED S/R (M5 TUNED)
+// =====================================================================================================================
+grpSR        = "14 • Profile-Guided S/R"
+enableSR     = input.bool(true, "Enable Profile S/R (Master Switch)", group=grpSR)
+swingLen     = input.int(4, "Swing Length", minval=2, maxval=25, group=grpSR, inline="sr1")
+srchAtr      = input.float(0.95, "Search ATR", minval=0.20, maxval=3.00, step=0.05, group=grpSR, inline="sr1")
+nodeMin      = input.float(0.12, "Min Node", minval=0.0, maxval=1.0, step=0.01, group=grpSR, inline="sr2")
+evidMin      = input.float(0.30, "Min Evidence", minval=0.0, maxval=1.0, step=0.01, group=grpSR, inline="sr2")
+pullMax      = input.float(0.70, "Profile Pull", minval=0.0, maxval=1.0, step=0.05, group=grpSR, inline="sr3")
+scoreMin     = input.float(40.0, "Min Score", minval=0, maxval=100, step=1, group=grpSR, inline="sr3")
+maxLvl       = input.int(10, "Max Levels", minval=2, maxval=40, group=grpSR, inline="sr4")
+mergeAtr     = input.float(0.25, "Merge ATR", minval=0.0, maxval=1.0, step=0.02, group=grpSR, inline="sr4")
+breakAtr     = input.float(0.12, "Break ATR", minval=0.0, maxval=0.5, step=0.01, group=grpSR, inline="sr4")
+srLvlStyle   = input.string("Dashed", "Line Style", options=["Solid", "Dotted", "Dashed"], group=grpSR, inline="sr5")
+widSR        = input.int(1, "Width", minval=1, maxval=4, group=grpSR, inline="sr5")
+showRaw      = input.bool(false, "Show Raw Pivot Lines", group=grpSR, inline="sr5")
+showEdge     = input.bool(true, "Show Score at Edge", group=grpSR, inline="sr5")
+
+// =====================================================================================================================
+// 15 • SQUEEZE INDEX (TABLE ONLY)
+// =====================================================================================================================
+grpSQZ       = "15 • Squeeze Index (Table Only)"
+enableSqz    = input.bool(true, "Enable Squeeze Index in Table", group=grpSQZ)
+sqzConv      = input.int(40, "Convergence Factor", minval=1, group=grpSQZ)
+sqzLen       = input.int(20, "Length", minval=1, group=grpSQZ)
+sqzSrc       = input.source(close, "Source", group=grpSQZ)
+sqzThreshold = input.float(80.0, "Compression Threshold", group=grpSQZ)
+
+// =====================================================================================================================
+// 16 • COLORS (MASTER THEME)
+// =====================================================================================================================
+grpCustom  = "16 • Colors (Master Theme)"
+cuFast     = input.color(#B37D13, "Fast EMA", group=grpCustom)
+cuSlow     = input.color(#1E4D6B, "Slow EMA", group=grpCustom)
+cuVwap     = input.color(#6D4C7D, "VWAP", group=grpCustom)
+cuLevel1   = input.color(#B37D13, "HTF EMA 1", group=grpCustom)
+cuDaily    = input.color(#707A7B, "Daily Open", group=grpCustom)
+cuPD       = input.color(#802C44, "PDH / PDL", group=grpCustom)
+cuTokyo    = input.color(#C15912, "Tokyo", group=grpCustom)
+cuLondon   = input.color(#1E4D6B, "London", group=grpCustom)
+cuNY       = input.color(#B37D13, "New York", group=grpCustom)
+cuSydney   = input.color(#4B524A, "Sydney", group=grpCustom)
+cuTblLabel = input.color(#E0D2B8, "Table Label Background", group=grpCustom)
+cuTblValue = input.color(#E0D2B8, "Table Value Background", group=grpCustom)
+cuTblText  = input.color(#2F3D46, "Table Label Text", group=grpCustom)
+cuTblVal   = input.color(#6D7A80, "Table Value Text", group=grpCustom)
+cuBull     = input.color(#4F7965, "Bullish (Table & Signals)", group=grpCustom)
+cuBear     = input.color(#A35C62, "Bearish (Table & Signals)", group=grpCustom)
+cuPbBull   = input.color(#00B0FF, "Bullish Pullback Line", group=grpCustom)
+cuPbBear   = input.color(#FF6D00, "Bearish Pullback Line", group=grpCustom)
+cuSqzComp  = input.color(#C15912, "Squeeze Compression (Table)", group=grpCustom)
+cuSqzRel   = input.color(#4F7965, "Squeeze Release (Table)", group=grpCustom)
+
+// COLOR MAPPING
+colFast       = cuFast
+colSlow       = cuSlow
+colVwap       = cuVwap
+colLevel1     = cuLevel1
+colDailyOpen  = cuDaily
+colPDLvl      = cuPD
+tokyoColor    = cuTokyo
+londonColor   = cuLondon
+nyColor       = cuNY
+sydneyColor   = cuSydney
+colTableLabel = cuTblLabel
+colTableValue = cuTblValue
+colTableText  = cuTblText
+colTableVal   = cuTblVal
+colBull       = cuBull
+colBear       = cuBear
+
+vpSupCol      = cuBull
+vpResCol      = cuBear
+vpCoreCol     = color.new(cuTblText, 40)
+vpRawCol      = color.new(cuDaily, 50)
+vpBuyCol      = cuBull
+vpSellCol     = cuBear
+vpPocCol      = cuFast
+
+// =====================================================================================================================
+// GLOBAL TECHNICAL INDICATORS & SESSIONS DETECTION
+// =====================================================================================================================
+atrLocal = ta.atr(14)   // shared: label collision + volume-profile ATR
+
+tokyoTZ  = "Asia/Tokyo"
+londonTZ = londonAutoDST ? "Europe/London" : "UTC"
+nyTZ     = nyAutoDST ? "America/New_York" : "Etc/GMT+5"
+sydneyTZ = sydneyAutoDST ? "Australia/Sydney" : "Etc/GMT-10"
+
+tokyoActive  = enableSessions and enableTokyo  and not na(time(timeframe.period, tokyoTime, tokyoTZ))
+londonActive = enableSessions and enableLondon and not na(time(timeframe.period, londonTime, londonTZ))
+nyActive     = enableSessions and enableNY     and not na(time(timeframe.period, nyTime, nyTZ))
+sydneyActive = enableSessions and enableSydney and not na(time(timeframe.period, sydneyTime, sydneyTZ))
+
+bool newTokyo  = tokyoActive  and not tokyoActive[1]
+bool newLondon = londonActive and not londonActive[1]
+bool newNY     = nyActive     and not nyActive[1]
+bool newSydney = sydneyActive and not sydneyActive[1]
+
+// =====================================================================================================================
+// CORE DCC CALCULATIONS
+// =====================================================================================================================
+emaFast = ta.ema(fastSource, fastLen)
+emaSlow = ta.ema(slowSource, slowLen)
+
+float dailyVwap = ta.vwap(vwapSource)
+float volSafe   = nz(volume, 1.0)
+float pvPiece   = vwapSource * volSafe
+
+var float tkPV = 0.0, var float tkV = 0.0, var int tkStart = -1
+var float lnPV = 0.0, var float lnV = 0.0, var int lnStart = -1
+var float nyPV = 0.0, var float nyV = 0.0, var int nyStart = -1
+var float syPV = 0.0, var float syV = 0.0, var int syStart = -1
+var float lastSessVwap = na
+var int   activeSessId = 0
+
+if vwapMode == "Sessions"
+    if tokyoActive
+        if newTokyo
+            tkPV := pvPiece, tkV := volSafe, tkStart := bar_index
+        else
+            tkPV += pvPiece, tkV += volSafe
+    if londonActive
+        if newLondon
+            lnPV := pvPiece, lnV := volSafe, lnStart := bar_index
+        else
+            lnPV += pvPiece, lnV += volSafe
+    if nyActive
+        if newNY
+            nyPV := pvPiece, nyV := volSafe, nyStart := bar_index
+        else
+            nyPV += pvPiece, nyV += volSafe
+    if sydneyActive
+        if newSydney
+            syPV := pvPiece, syV := volSafe, syStart := bar_index
+        else
+            syPV += pvPiece, syV += volSafe
+
+int bestStart = -1
+int chosenSess = 0
+float curSessVwap = na
+
+if sydneyActive and syStart >= bestStart
+    bestStart := syStart, chosenSess := 1, curSessVwap := syV > 0 ? syPV / syV : close
+if tokyoActive and tkStart >= bestStart
+    bestStart := tkStart, chosenSess := 2, curSessVwap := tkV > 0 ? tkPV / tkV : close
+if londonActive and lnStart >= bestStart
+    bestStart := lnStart, chosenSess := 3, curSessVwap := lnV > 0 ? lnPV / lnV : close
+if nyActive and nyStart >= bestStart
+    bestStart := nyStart, chosenSess := 4, curSessVwap := nyV > 0 ? nyPV / nyV : close
+
+if chosenSess != 0
+    lastSessVwap := curSessVwap
+
+bool sessChanged  = chosenSess != activeSessId
+activeSessId     := chosenSess
+float sessionVwap = chosenSess != 0 ? curSessVwap : lastSessVwap
+float activeVwap  = vwapMode == "Daily" ? dailyVwap : sessionVwap
+bool vwapBreak    = vwapMode == "Daily" ? (timeframe.isintraday and timeframe.change("D")) : (sessChanged or chosenSess == 0)
+
+// HTF EMA 1
+emaLevelHTF1    = request.security(syminfo.tickerid, htfEmaTF, ta.ema(htfEmaSource1, htfEmaLen1), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+htfSeconds      = timeframe.in_seconds(htfEmaTF)
+chartSeconds    = timeframe.in_seconds(timeframe.period)
+emaLengthRatio  = chartSeconds > 0 and htfSeconds > 0 ? htfSeconds / chartSeconds : 1.0
+smoothEmaLen1   = math.max(1, math.round(htfEmaLen1 * emaLengthRatio))
+emaLevelSmooth1 = ta.ema(htfEmaSource1, smoothEmaLen1)
+htfEmaPlot1 = htfEmaDisplayMode == "Actual HTF EMA" ? emaLevelHTF1 : emaLevelSmooth1
+
+// BIAS & ADX & ATR
+bool biasLong   = not na(htfEmaPlot1) and close > htfEmaPlot1
+bool biasShort  = not na(htfEmaPlot1) and close < htfEmaPlot1
+
+[diPlus, diMinus, adxVal] = request.security(syminfo.tickerid, adxTF, ta.dmi(adxLen, adxSmooth), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+atrHTF = request.security(syminfo.tickerid, atrTF, ta.atr(atrLen), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+isForex    = syminfo.type == "forex"
+isJPYQuote = syminfo.currency == "JPY"
+pipSize    = isForex ? (isJPYQuote ? 0.01 : 0.0001) : na
+
+atrSLDist  = atrHTF * atrMult
+liveSL     = biasLong ? close - atrSLDist : biasShort ? close + atrSLDist : na
+float atrCalcPips = isForex and not na(atrSLDist) and not na(pipSize) and pipSize > 0 ? atrSLDist / pipSize : na
+
+// =====================================================================================================================
+// SQUEEZE INDEX CALCULATION
+// =====================================================================================================================
+var float maxSqz = 0.
+var float minSqz = 0.
+maxSqz := nz(math.max(sqzSrc, maxSqz - (maxSqz - sqzSrc) / sqzConv), sqzSrc)
+minSqz := nz(math.min(sqzSrc, minSqz + (sqzSrc - minSqz) / sqzConv), sqzSrc)
+diffSqz = math.log(maxSqz - minSqz)
+float psi = -50 * ta.correlation(diffSqz, bar_index, sqzLen) + 50
+
+// =====================================================================================================================
+// TREND STRENGTH MATRIX (TSM) — ONE security call per timeframe (was two)
+// =====================================================================================================================
+f_fmtTF(string tf) =>
+    switch tf
+        "1"   => "1m"
+        "3"   => "3m"
+        "5"   => "5m"
+        "15"  => "15m"
+        "30"  => "30m"
+        "45"  => "45m"
+        "60"  => "1H"
+        "120" => "2H"
+        "180" => "3H"
+        "240" => "4H"
+        "D"   => "1D"
+        "1D"  => "1D"
+        "W"   => "1W"
+        "1W"  => "1W"
+        "M"   => "1M"
+        "1M"  => "1M"
+        => tf
+
+calcADX_TSM(int len) =>
+    float trueRange = math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+    float atr = ta.rma(trueRange, len)
+    float upMove = high - high[1]
+    float downMove = low[1] - low
+    float plusDM = upMove > downMove and upMove > 0 ? upMove : 0
+    float minusDM = downMove > upMove and downMove > 0 ? downMove : 0
+    float plusDI = 100 * ta.rma(plusDM, len) / atr
+    float minusDI = 100 * ta.rma(minusDM, len) / atr
+    float dx = math.abs(plusDI - minusDI) / (plusDI + minusDI) * 100
+    float adx = ta.rma(dx, len)
+    [adx, plusDI, minusDI]
+
+// One evaluation returns LIVE values plus their [1] (= last closed HTF bar).
+// lookahead is OFF, so [1] is always a completed HTF bar -> non-repainting.
+calcTSM() =>
+    float rsi = ta.rsi(close, tsmRsiLength)
+    float rsiS = (rsi - 50) / 50
+    [macdLine, macdSig, macdHist] = ta.macd(close, tsmMacdFast, tsmMacdSlow, tsmMacdSignal)
+    float macdNorm = ta.stdev(macdLine, 100)
+    float macdS = macdNorm != 0 ? math.max(-1, math.min(1, macdLine / (macdNorm * 2))) : 0
+    [adxV, plusDI, minusDI] = calcADX_TSM(tsmAdxLength)
+    float adxStr = math.min(adxV / 50, 1)
+    float adxS = adxStr * (plusDI > minusDI ? 1.0 : -1.0)
+    float ma = ta.sma(close, tsmMaLength)
+    float maRaw = close > ma ? 1.0 : -1.0
+    float maStrength = math.abs(close - ma) / ma * 10
+    float maS = math.max(-1, math.min(1, maRaw * math.min(maStrength, 1)))
+    float cmp = (rsiS + macdS + adxS + maS) * 0.25
+    [rsiS, macdS, adxS, maS, cmp, rsi, adxV, rsiS[1], macdS[1], adxS[1], maS[1], cmp[1], rsi[1], adxV[1]]
+
+[rs1_l, mc1_l, ad1_l, mas1_l, cmp1_l, r1_l, a1_l, rs1_c, mc1_c, ad1_c, mas1_c, cmp1_c, r1_c, a1_c] = request.security(syminfo.tickerid, tsmTf1, calcTSM(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[rs2_l, mc2_l, ad2_l, mas2_l, cmp2_l, r2_l, a2_l, rs2_c, mc2_c, ad2_c, mas2_c, cmp2_c, r2_c, a2_c] = request.security(syminfo.tickerid, tsmTf2, calcTSM(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[rs3_l, mc3_l, ad3_l, mas3_l, cmp3_l, r3_l, a3_l, rs3_c, mc3_c, ad3_c, mas3_c, cmp3_c, r3_c, a3_c] = request.security(syminfo.tickerid, tsmTf3, calcTSM(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+bool tsmUseClosed = tsmConfirmMode == "Last Closed HTF"
+rsiScore1  = nz(tsmUseClosed ? rs1_c  : rs1_l, 0)
+macdScore1 = nz(tsmUseClosed ? mc1_c  : mc1_l, 0)
+adxScore1  = nz(tsmUseClosed ? ad1_c  : ad1_l, 0)
+maScore1   = nz(tsmUseClosed ? mas1_c : mas1_l, 0)
+composite1 = nz(tsmUseClosed ? cmp1_c : cmp1_l, 0)
+rsi1       = nz(tsmUseClosed ? r1_c   : r1_l, 50)
+adx1       = nz(tsmUseClosed ? a1_c   : a1_l, 0)
+
+rsiScore2  = nz(tsmUseClosed ? rs2_c  : rs2_l, 0)
+macdScore2 = nz(tsmUseClosed ? mc2_c  : mc2_l, 0)
+adxScore2  = nz(tsmUseClosed ? ad2_c  : ad2_l, 0)
+maScore2   = nz(tsmUseClosed ? mas2_c : mas2_l, 0)
+composite2 = nz(tsmUseClosed ? cmp2_c : cmp2_l, 0)
+rsi2       = nz(tsmUseClosed ? r2_c   : r2_l, 50)
+adx2       = nz(tsmUseClosed ? a2_c   : a2_l, 0)
+
+rsiScore3  = nz(tsmUseClosed ? rs3_c  : rs3_l, 0)
+macdScore3 = nz(tsmUseClosed ? mc3_c  : mc3_l, 0)
+adxScore3  = nz(tsmUseClosed ? ad3_c  : ad3_l, 0)
+maScore3   = nz(tsmUseClosed ? mas3_c : mas3_l, 0)
+composite3 = nz(tsmUseClosed ? cmp3_c : cmp3_l, 0)
+rsi3       = nz(tsmUseClosed ? r3_c   : r3_l, 50)
+adx3       = nz(tsmUseClosed ? a3_c   : a3_l, 0)
+
+float tsmMtfScore = (composite1 * 0.25 + composite2 * 0.20 + composite3 * 0.15) / 0.60
+float tsmScorePct = tsmMtfScore * 100.0
+
+bool tsmAllBull = composite1 > 0 and composite2 > 0 and composite3 > 0
+bool tsmAllBear = composite1 < 0 and composite2 < 0 and composite3 < 0
+
+scoreToColor_TSM(float score) =>
+    color result = colTableVal
+    if score > 0.5
+        result := colBull
+    else if score > 0.2
+        result := color.new(colBull, 40)
+    else if score < -0.5
+        result := colBear
+    else if score < -0.2
+        result := color.new(colBear, 40)
+    result
+
+tfArrow(float score) =>
+    score > 0.2 ? "▲" : score < -0.2 ? "▼" : "•"
+
+string tf1Lbl = f_fmtTF(tsmTf1)
+string tf2Lbl = f_fmtTF(tsmTf2)
+string tf3Lbl = f_fmtTF(tsmTf3)
+
+// =====================================================================================================================
+// EMA CROSSOVER MARKERS (❌) & PULLBACK / P3 STATE MACHINE
+// =====================================================================================================================
+bool crossBull = ta.crossover(emaFast, emaSlow)
+bool crossBear = ta.crossunder(emaFast, emaSlow)
+
+bool vwapOkBull = not na(activeVwap) and close > activeVwap
+bool vwapOkBear = not na(activeVwap) and close < activeVwap
+bool adxBaseOk  = not na(adxVal) and adxVal >= sigMinAdx
+
+bool crossConflBull = (not crossUseVwap or vwapOkBull) and (not crossUseHtfEma or biasLong) and (not crossUseAdx or adxBaseOk) and (not crossUseTsm or tsmScorePct >= sigMinTsmScore) and (not crossUseTsmAllAlign or tsmAllBull)
+bool crossConflBear = (not crossUseVwap or vwapOkBear) and (not crossUseHtfEma or biasShort) and (not crossUseAdx or adxBaseOk) and (not crossUseTsm or tsmScorePct <= -sigMinTsmScore) and (not crossUseTsmAllAlign or tsmAllBear)
+
+bool crossQualBull   = crossBull and crossConflBull
+bool crossQualBear   = crossBear and crossConflBear
+
+bool crossMarkerBull = showCrossMarkers and crossQualBull
+bool crossMarkerBear = showCrossMarkers and crossQualBear
+
+bool entryConflBull = (not sigUseVwap or vwapOkBull) and (not sigUseHtfEma or biasLong) and (not sigUseAdx or adxBaseOk) and (not sigUseTsm or tsmScorePct >= sigMinTsmScore) and (not sigTsmAllAligned or tsmAllBull)
+bool entryConflBear = (not sigUseVwap or vwapOkBear) and (not sigUseHtfEma or biasShort) and (not sigUseAdx or adxBaseOk) and (not sigUseTsm or tsmScorePct <= -sigMinTsmScore) and (not sigTsmAllAligned or tsmAllBear)
+
+float targetEmaVal = pbTargetEma == "Fast EMA" ? emaFast : emaSlow
+bool bullEmaTouch  = pbTouchMode == "Wick or Close Touch" ? (low <= targetEmaVal and close >= emaSlow) : (close <= targetEmaVal and close >= emaSlow)
+bool bearEmaTouch  = pbTouchMode == "Wick or Close Touch" ? (high >= targetEmaVal and close <= emaSlow) : (close >= targetEmaVal and close <= emaSlow)
+
+var int   trendDir       = 0
+var int   validCrossDir  = 0
+var int   pbStage        = 0
+var int   crossBarIdx    = na
+var int   pbTouchBar     = na
+var float pbSwingExtreme = na
+var int   pbExtremeBar   = na
+var line  activePbLine   = na
+
+f_finalizePbLine(line ln, int endBar, bool keepHist, bool masterShow) =>
+    if not na(ln)
+        if keepHist and masterShow
+            line.set_x2(ln, endBar)
+        else
+            line.delete(ln)
+    true
+
+if not showPbLines and not na(activePbLine)
+    line.delete(activePbLine)
+    activePbLine := na
+
+if crossBull
+    f_finalizePbLine(activePbLine, bar_index, showHistPbLines, showPbLines)
+    activePbLine   := na
+    trendDir       := 1
+    validCrossDir  := crossQualBull ? 1 : 0
+    pbStage        := 1
+    crossBarIdx    := bar_index
+    pbTouchBar     := na
+    pbSwingExtreme := high
+    pbExtremeBar   := bar_index
+else if crossBear
+    f_finalizePbLine(activePbLine, bar_index, showHistPbLines, showPbLines)
+    activePbLine   := na
+    trendDir       := -1
+    validCrossDir  := crossQualBear ? -1 : 0
+    pbStage        := 1
+    crossBarIdx    := bar_index
+    pbTouchBar     := na
+    pbSwingExtreme := low
+    pbExtremeBar   := bar_index
+
+bool buyPbSignal  = false
+bool sellPbSignal = false
+
+if enablePullbackEntry and trendDir != 0
+    if pbStage == 1 and bar_index > crossBarIdx
+        if trendDir == 1
+            if high >= pbSwingExtreme
+                pbSwingExtreme := high
+                pbExtremeBar   := bar_index
+            if bullEmaTouch
+                pbStage    := 2
+                pbTouchBar := bar_index
+                if showPbLines and (not tiePbToValidCross or validCrossDir == 1)
+                    activePbLine := line.new(pbExtremeBar, pbSwingExtreme, bar_index + 1, pbSwingExtreme, color=cuPbBull, style=line.style_dotted, width=2)
+        else if trendDir == -1
+            if low <= pbSwingExtreme
+                pbSwingExtreme := low
+                pbExtremeBar   := bar_index
+            if bearEmaTouch
+                pbStage    := 2
+                pbTouchBar := bar_index
+                if showPbLines and (not tiePbToValidCross or validCrossDir == -1)
+                    activePbLine := line.new(pbExtremeBar, pbSwingExtreme, bar_index + 1, pbSwingExtreme, color=cuPbBear, style=line.style_dotted, width=2)
+
+    else if pbStage == 2 and bar_index > pbTouchBar
+        bool bullBreakHit = pbBreakTrigger == "Candle Close" ? (close > pbSwingExtreme) : (high > pbSwingExtreme)
+        bool bearBreakHit = pbBreakTrigger == "Candle Close" ? (close < pbSwingExtreme) : (low < pbSwingExtreme)
+        bool pbCrossAllowedBull = not tiePbToValidCross or validCrossDir == 1
+        bool pbCrossAllowedBear = not tiePbToValidCross or validCrossDir == -1
+
+        if trendDir == 1 and bullBreakHit
+            if pbCrossAllowedBull and entryConflBull
+                buyPbSignal := true
+            pbStage := 3
+            f_finalizePbLine(activePbLine, bar_index, showHistPbLines, showPbLines)
+            activePbLine := na
+        else if trendDir == -1 and bearBreakHit
+            if pbCrossAllowedBear and entryConflBear
+                sellPbSignal := true
+            pbStage := 3
+            f_finalizePbLine(activePbLine, bar_index, showHistPbLines, showPbLines)
+            activePbLine := na
+        else if showPbLines and not na(activePbLine)
+            line.set_x2(activePbLine, bar_index + 1)
+
+// P3 ENGINE
+var int   p3State         = 0
+var int   p3Dir           = 0
+var int   p3TouchBar      = na
+var float p3BreakLevel    = na
+var int   lastP3SignalBar = -9999
+
+bool buyP3Signal  = false
+bool sellP3Signal = false
+
+if crossBull or crossBear
+    p3State := 0
+    p3Dir   := 0
+
+if enableP3ReEntry and not buyPbSignal and not sellPbSignal
+    bool trendStackBull     = emaFast > emaSlow and close > emaSlow
+    bool trendStackBear     = emaFast < emaSlow and close < emaSlow
+    bool distOk             = (bar_index - lastP3SignalBar) >= p3MinDistBars
+    bool p3CrossAllowedBull = not tieP3ToValidCross or validCrossDir == 1
+    bool p3CrossAllowedBear = not tieP3ToValidCross or validCrossDir == -1
+
+    if p3State == 1 and bar_index > p3TouchBar
+        int barsSinceP3Touch = bar_index - p3TouchBar
+        bool p3BullBreak     = pbBreakTrigger == "Candle Close" ? (close > p3BreakLevel) : (high > p3BreakLevel)
+        bool p3BearBreak     = pbBreakTrigger == "Candle Close" ? (close < p3BreakLevel) : (low < p3BreakLevel)
+
+        if p3Dir == 1 and p3BullBreak and barsSinceP3Touch <= p3BreakoutBars and distOk and p3CrossAllowedBull and entryConflBull
+            buyP3Signal     := true
+            lastP3SignalBar := bar_index
+            p3State         := 0
+        else if p3Dir == -1 and p3BearBreak and barsSinceP3Touch <= p3BreakoutBars and distOk and p3CrossAllowedBear and entryConflBear
+            sellP3Signal    := true
+            lastP3SignalBar := bar_index
+            p3State         := 0
+        else if barsSinceP3Touch >= p3BreakoutBars
+            p3State := 0
+
+    if p3State == 0 and (pbStage == 0 or pbStage == 3) and distOk
+        if trendStackBull and bullEmaTouch and p3CrossAllowedBull
+            p3State      := 1
+            p3Dir        := 1
+            p3TouchBar   := bar_index
+            p3BreakLevel := high
+        else if trendStackBear and bearEmaTouch and p3CrossAllowedBear
+            p3State      := 1
+            p3Dir        := -1
+            p3TouchBar   := bar_index
+            p3BreakLevel := low
+
+// =====================================================================================================================
+// NATIVE DAILY DATA & KEY LEVELS — ONE security call (was four)
+// =====================================================================================================================
+[nativeDStart, nativeDOpen, pdHigh, pdLow] = request.security(syminfo.tickerid, "D", [time, open, high[1], low[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+
+bool isNewNativeDay = not na(nativeDStart[1]) and nativeDStart != nativeDStart[1]
+
+type KeyLevel
+    float price
+    int t
+    string name
+    bool isHigh
+    color col
+    string sty
+    int wid
+    line ln
+    label lb
+
+styleOf(string s) =>
+    s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+
+clearLevel(KeyLevel kl) =>
+    if not na(kl.ln)
+        line.delete(kl.ln)
+        kl.ln := na
+    if not na(kl.lb)
+        label.delete(kl.lb)
+        kl.lb := na
+    kl.price := na, kl.t := na, kl.name := ""
+
+updateLevel(KeyLevel kl, float pRaw, int startT, string name, bool isHigh, color c, string sty, int wid, int endT, bool extendRight) =>
+    if not na(pRaw) and not na(startT)
+        float p = math.round_to_mintick(pRaw)
+        int actualEnd = math.max(startT + 1, endT)
+        kl.price := p, kl.t := startT, kl.name := name, kl.isHigh := isHigh, kl.col := c, kl.sty := sty, kl.wid := wid
+        string lblText = name + "  " + str.tostring(p, format.mintick)
+        color lblBg = labSolid ? chart.bg_color : color.new(c, 100)
+        lineExtend = extendRight ? extend.right : extend.none
+        if na(kl.ln)
+            kl.ln := line.new(startT, p, actualEnd, p, xloc=xloc.bar_time, extend=lineExtend, color=c, style=styleOf(sty), width=wid)
+        else
+            line.set_extend(kl.ln, lineExtend)
+            line.set_xy1(kl.ln, startT, p)
+            line.set_xy2(kl.ln, actualEnd, p)
+            line.set_color(kl.ln, c)
+            line.set_style(kl.ln, styleOf(sty))
+            line.set_width(kl.ln, wid)
+        if na(kl.lb)
+            kl.lb := label.new(bar_index + labOffset, p, lblText, xloc=xloc.bar_index, style=label.style_label_left, color=lblBg, textcolor=c, size=size.small)
+        else
+            label.set_xy(kl.lb, bar_index + labOffset, p)
+            label.set_text(kl.lb, lblText)
+            label.set_color(kl.lb, lblBg)
+            label.set_textcolor(kl.lb, c)
+            label.set_style(kl.lb, label.style_label_left)
+    true
+
+refreshLevelEnd(KeyLevel kl, int endT) =>
+    if not na(kl.ln) and not na(kl.t) and not na(kl.price)
+        line.set_xy2(kl.ln, math.max(kl.t + 1, endT), kl.price)
+    if not na(kl.lb) and not na(kl.price)
+        label.set_xy(kl.lb, bar_index + labOffset, kl.price)
+    true
+
+var KeyLevel klPDH = KeyLevel.new()
+var KeyLevel klPDL = KeyLevel.new()
+var KeyLevel klDO  = KeyLevel.new()
+
+liveMarketX = time
+dailyEndX   = math.max(nz(nativeDStart) + 1, liveMarketX)
+
+bool activeDO = enableLevels and showDailyOpen
+if (isNewNativeDay or na(klDO.ln)) and activeDO and not na(nativeDOpen) and not na(nativeDStart)
+    clearLevel(klDO)
+    updateLevel(klDO, nativeDOpen, nativeDStart, "DO", false, colDailyOpen, styDO, widDO, dailyEndX, false)
+if activeDO and not na(nativeDStart)
+    refreshLevelEnd(klDO, dailyEndX)
+if not activeDO
+    clearLevel(klDO)
+
+bool activePD = enableLevels and showPDLvl
+if (isNewNativeDay or na(klPDH.ln)) and not na(pdHigh) and not na(pdLow) and not na(nativeDStart) and activePD
+    clearLevel(klPDH)
+    clearLevel(klPDL)
+    updateLevel(klPDH, pdHigh, nativeDStart, "PDH", true, colPDLvl, styPDLvl, widPDLvl, dailyEndX, false)
+    updateLevel(klPDL, pdLow, nativeDStart, "PDL", false, colPDLvl, styPDLvl, widPDLvl, dailyEndX, false)
+if activePD and not na(pdHigh) and not na(nativeDStart)
+    refreshLevelEnd(klPDH, dailyEndX)
+    refreshLevelEnd(klPDL, dailyEndX)
+if not activePD
+    clearLevel(klPDH)
+    clearLevel(klPDL)
+
+// =====================================================================================================================
+// SESSION RANGE BOXES — box border replaces the 6 per-session outline lines
+// =====================================================================================================================
+f_sessionManager(bool active, string sessName, color sessColor) =>
+    var box          rangeBoxId   = na
+    var label        rangeLabelId = na
+    var int          startBar     = 0
+    var float        curHi        = na
+    var float        curLo        = na
+    var bool         prevActive   = false
+    var array<box>   histBx       = array.new<box>()
+    var array<label> histLb       = array.new<label>()
+
+    bool drawActive = active and enableRangeBoxes
+
+    if not enableRangeBoxes and histBx.size() > 0
+        while histBx.size() > 0
+            box.delete(histBx.pop())
+        while histLb.size() > 0
+            label.delete(histLb.pop())
+        rangeBoxId   := na
+        rangeLabelId := na
+        prevActive   := false
+
+    if drawActive and not prevActive
+        startBar := bar_index
+        curHi    := high
+        curLo    := low
+        rangeBoxId := box.new(bar_index, high, bar_index, low, bgcolor=color.new(sessColor, rangeTransparency), border_color=showRangeOutline ? color.new(sessColor, outlineTransp) : na, border_width=1, border_style=line.style_dotted)
+        histBx.push(rangeBoxId)
+        if showRangeLabel
+            rangeLabelId := label.new(bar_index, high, sessName, textcolor=sessColor, style=label.style_label_down, color=labSolid ? chart.bg_color : color.new(color.black, 100), size=size.tiny)
+            histLb.push(rangeLabelId)
+        while histBx.size() > sessHistLimit
+            box.delete(histBx.shift())
+        while histLb.size() > sessHistLimit
+            label.delete(histLb.shift())
+    else if drawActive
+        curHi := math.max(nz(curHi, high), high)
+        curLo := math.min(nz(curLo, low), low)
+        if not na(rangeBoxId)
+            box.set_top(rangeBoxId, curHi)
+            box.set_rightbottom(rangeBoxId, bar_index, curLo)
+        if showRangeLabel and not na(rangeLabelId)
+            label.set_xy(rangeLabelId, int(math.avg(startBar, bar_index)), curHi)
+    prevActive := drawActive
+    true
+
+f_sessionManager(tokyoActive, tokyoName, tokyoColor)
+f_sessionManager(londonActive, londonName, londonColor)
+f_sessionManager(nyActive, nyName, nyColor)
+f_sessionManager(sydneyActive, sydneyName, sydneyColor)
+
+// =====================================================================================================================
+// VOLUME PROFILE & S/R LOGIC
+// =====================================================================================================================
+type SrLvl
+    float p
+    float sc
+    float raw
+    float node
+    float evid
+    float nStr
+    bool supp
+    int born
+    line ln
+
+clip(float x) => math.max(0.0, math.min(1.0, x))
+vp_lstyle(string s) => s == "Dotted" ? line.style_dotted : s == "Dashed" ? line.style_dashed : line.style_solid
+vp_lalpha(float s) => s >= 82 ? 8 : s >= 62 ? 22 : s >= 45 ? 38 : 52
+row_id(float p, float bot, float step, int rows) => math.max(0, math.min(rows - 1, int(math.floor((p - bot) / step))))
+lvl_col(bool supp) => supp ? vpSupCol : vpResCol
+
+clear_boxes(array<box> a) =>
+    while a.size() > 0
+        box.delete(a.pop())
+clear_lines(array<line> a) =>
+    while a.size() > 0
+        line.delete(a.pop())
+clear_labels(array<label> a) =>
+    while a.size() > 0
+        label.delete(a.pop())
+
+profile(int newest, int oldest, int rows) =>
+    float lo = low[newest]
+    float hi = high[newest]
+    for i = newest to oldest
+        lo := math.min(lo, low[i])
+        hi := math.max(hi, high[i])
+    float span = math.max(hi - lo, syminfo.mintick * rows)
+    float bot = lo - (span - (hi - lo)) * 0.5
+    float step = span / rows
+    array<float> tot = array.new_float(rows, 0.0)
+    array<float> buy = array.new_float(rows, 0.0)
+    for i = newest to oldest
+        float l = low[i]
+        float h = high[i]
+        float r = h - l
+        float v = math.max(nz(volume[i], 0.0), 0.0)
+        float bf = r > 0 ? clip((close[i] - l) / r) : 0.5
+        int r0 = row_id(l, bot, step, rows)
+        int r1 = row_id(h, bot, step, rows)
+        for j = r0 to r1
+            float rl = bot + j * step
+            float ov = r > 0 ? math.max(0.0, math.min(h, rl + step) - math.max(l, rl)) : step
+            float frac = r > 0 ? ov / r : 1.0
+            if frac > 0
+                float av = v * frac
+                tot.set(j, tot.get(j) + av)
+                buy.set(j, buy.get(j) + av * bf)
+    [bot, step, tot, buy]
+
+pivot_features(bool supp, float vAvg) =>
+    float vb = nz(vAvg[swingLen], volume[swingLen])
+    float vr = vb > 0 ? nz(volume[swingLen], 0.0) / vb : 1.0
+    float vSc = clip((vr - 0.8) / (2.2 - 0.8))
+    float pr = math.max(high[swingLen] - low[swingLen], syminfo.mintick)
+    float wick = supp ? math.min(open[swingLen], close[swingLen]) - low[swingLen] : high[swingLen] - math.max(open[swingLen], close[swingLen])
+    float wSc = clip((wick / pr) / 0.50)
+    float absSc = 0.0
+    for n = 0 to (math.min(3, swingLen) * 2)
+        int o = swingLen - math.min(3, swingLen) + n
+        float cr = math.max(high[o] - low[o], syminfo.mintick)
+        float v = math.max(nz(volume[o], 0.0), 0.0)
+        float base = nz(vAvg[o], v)
+        float vRat = base > 0 ? v / base : 1.0
+        float bRat = math.abs(close[o] - open[o]) / cr
+        float small = clip((0.40 - bRat) / 0.40)
+        float av = clip((vRat - 1.0) / (1.5 - 1.0))
+        absSc := math.max(absSc, math.sqrt(small * av))
+    [vSc, wSc, absSc]
+
+profile_node(float raw, bool supp, float atrP, float bot, float step, array<float> tot, array<float> buy) =>
+    float mx = math.max(tot.max(), 0.0000001)
+    float rad = math.max(atrP * srchAtr, step * 2.0)
+    float bestP = raw, bestE = -1.0, bestS = 0.0, bestPk = 0.0, bestDir = 0.5
+    int rows = tot.size()
+    for r = 0 to rows - 1
+        float p = bot + (r + 0.5) * step
+        float d = math.abs(p - raw)
+        if d <= rad
+            float rv = tot.get(r)
+            float str = rv / mx
+            float lv = r > 0 ? tot.get(r - 1) : rv
+            float rv2 = r < rows - 1 ? tot.get(r + 1) : rv
+            float nAvg = math.max((lv + rv2) * 0.5, mx * 0.01)
+            float pk = clip((rv / nAvg - 0.85) / 0.65)
+            float bSh = rv > 0 ? clip(buy.get(r) / rv) : 0.5
+            float dir = supp ? bSh : 1.0 - bSh
+            float prox = 1.0 - d / rad
+            float e = 0.50 * str + 0.20 * pk + 0.20 * dir + 0.10 * prox
+            if e > bestE
+                bestE := e, bestP := p, bestS := str, bestPk := pk, bestDir := dir
+    [bestP, math.max(bestE, 0.0), bestS, bestPk, bestDir]
+
+nearby(array<SrLvl> a, float p, bool supp, float tol) =>
+    int id = -1
+    float best = 1e20
+    if a.size() > 0
+        for i = 0 to a.size() - 1
+            SrLvl lv = a.get(i)
+            if lv.supp == supp
+                float d = math.abs(lv.p - p)
+                if d <= tol and d < best
+                    best := d, id := i
+    id
+
+make_line(int born, float p, bool supp, float sc) =>
+    line.new(born, p, time, p, xloc=xloc.bar_time, extend=extend.none, color=color.new(lvl_col(supp), vp_lalpha(sc)), width=widSR, style=vp_lstyle(srLvlStyle))
+
+store_lvl(array<SrLvl> a, float p, float raw, float node, float evid, float nStr, bool supp, float sc, int born, float atrP) =>
+    bool changed = false
+    float tol = math.max(atrP * mergeAtr, syminfo.mintick)
+    int id = nearby(a, p, supp, tol)
+    if id >= 0
+        SrLvl lv = a.get(id)
+        if sc > lv.sc
+            lv.p := p, lv.sc := sc, lv.raw := raw, lv.node := node, lv.evid := evid, lv.nStr := nStr, lv.born := born
+            line.set_xy1(lv.ln, born, p), line.set_xy2(lv.ln, time, p)
+            line.set_color(lv.ln, color.new(lvl_col(supp), vp_lalpha(sc))), line.set_width(lv.ln, widSR)
+            a.set(id, lv)
+            changed := true
+    else
+        a.push(SrLvl.new(p, sc, raw, node, evid, nStr, supp, born, make_line(born, p, supp, sc)))
+        changed := true
+    changed
+
+remove_lvl(array<SrLvl> a, int id) =>
+    SrLvl lv = a.get(id)
+    line.delete(lv.ln)
+    a.remove(id)
+    0
+
+trim_lvls(array<SrLvl> a) =>
+    while a.size() > maxLvl
+        int weak = 0
+        float sc = a.get(0).sc
+        for i = 1 to a.size() - 1
+            if a.get(i).sc < sc
+                sc := a.get(i).sc, weak := i
+        remove_lvl(a, weak)
+    0
+
+// Only the right edge needs to move each bar; style/colour/width are set at creation
+// (a full recalculation happens whenever the user changes those inputs).
+update_lvls(array<SrLvl> a) =>
+    if a.size() > 0
+        for i = 0 to a.size() - 1
+            SrLvl lv = a.get(i)
+            line.set_xy2(lv.ln, time, lv.p)
+    0
+
+level_row(array<SrLvl> a, float lo, float hi) =>
+    int side = 0
+    if a.size() > 0
+        for i = 0 to a.size() - 1
+            SrLvl lv = a.get(i)
+            if lv.p >= lo and lv.p <= hi
+                side := lv.supp ? 1 : -1
+                break
+    side
+
+// Histogram is now passed in, so one profile() serves BOTH the support and resistance pivot.
+pivot_eval(array<SrLvl> a, float raw, bool supp, float vAvg, float atrP, float bot, float step, array<float> tot, array<float> buy) =>
+    float validAtr = math.max(nz(atrP[swingLen], syminfo.mintick), syminfo.mintick)
+    [node, evid, nStr, pk, dir] = profile_node(raw, supp, validAtr, bot, step, tot, buy)
+    [vSc, wSc, aSc] = pivot_features(supp, vAvg)
+    bool ok = nStr >= nodeMin and evid >= evidMin
+    float pull = ok ? pullMax * clip(evid / 0.65) : 0.0
+    float p = raw + (node - raw) * pull
+    float sc = 100.0 * (0.50 * evid + 0.20 * aSc + 0.15 * vSc + 0.15 * wSc)
+    bool stored = ok and sc >= scoreMin ? store_lvl(a, p, raw, node, evid, nStr, supp, sc, time[swingLen], validAtr) : false
+    [stored, sc, p, node, evid, nStr, pk, dir]
+
+manage_breaks(array<SrLvl> a, float atrP) =>
+    bool sBreak = false, rBreak = false
+    if a.size() > 0
+        for i = a.size() - 1 to 0
+            SrLvl lv = a.get(i)
+            float buf = math.max(nz(atrP, 0.0) * breakAtr, 0.0)
+            bool broken = barstate.isconfirmed and (lv.supp ? close < lv.p - buf : close > lv.p + buf)
+            if broken
+                sBreak := sBreak or lv.supp, rBreak := rBreak or not lv.supp
+                remove_lvl(a, i)
+    [sBreak, rBreak]
+
+draw_markers(array<SrLvl> a, array<label> lbs, array<line> lns) =>
+    if showRaw and a.size() > 0
+        for i = 0 to a.size() - 1
+            SrLvl lv = a.get(i)
+            lbs.push(label.new(x=lv.born, y=lv.raw, text="", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_circle, color=color.new(vpRawCol, 60), textcolor=vpRawCol, size=size.tiny))
+            lns.push(line.new(x1=lv.born, y1=lv.raw, x2=lv.born, y2=lv.p, xloc=xloc.bar_time, color=color.new(vpCoreCol, 45), width=1, style=line.style_dotted))
+    0
+
+draw_edge(array<SrLvl> a, array<label> lbs) =>
+    if showEdge and a.size() > 0
+        for i = 0 to a.size() - 1
+            SrLvl lv = a.get(i)
+            color c = lvl_col(lv.supp)
+            lbs.push(label.new(x=bar_index + 1, y=lv.p, text=str.tostring(lv.sc, "#"), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=color.new(c, 100), textcolor=c, size=size.small))
+    0
+
+draw_profile(array<SrLvl> a, array<box> bx, array<line> ln, array<label> lb) =>
+    int bars = math.max(1, math.min(profLb, bar_index + 1))
+    [bot, step, tot, buy] = profile(0, bars - 1, profRows)
+    float mx = tot.max()
+    if mx > 0
+        int poc = tot.indexof(mx)
+        int x = bar_index + profOff
+        for r = 0 to profRows - 1
+            float rv = tot.get(r)
+            if rv > 0
+                float str = rv / mx
+                float bSh = clip(buy.get(r) / rv)
+                int tw = math.max(1, int(math.round(profW * str)))
+                int bw = int(math.round(tw * bSh))
+                int sw = tw - bw
+                float y0 = bot + (r + 0.08) * step
+                float y1 = bot + (r + 0.92) * step
+                int fade = int(math.round(76.0 - 46.0 * str))
+                if bw > 0
+                    bx.push(box.new(left=x, top=y1, right=x + bw, bottom=y0, xloc=xloc.bar_index, border_color=color.new(vpBuyCol, 100), bgcolor=color.new(vpBuyCol, fade)))
+                if sw > 0
+                    bx.push(box.new(left=x + bw, top=y1, right=x + tw, bottom=y0, xloc=xloc.bar_index, border_color=color.new(vpSellCol, 100), bgcolor=color.new(vpSellCol, fade)))
+                if showPoc and r == poc
+                    bx.push(box.new(left=x, top=y1, right=x + tw, bottom=y0, xloc=xloc.bar_index, border_color=vpPocCol, border_width=2, bgcolor=color.new(vpPocCol, 88)))
+                if showLvlRows
+                    int side = level_row(a, y0, y1)
+                    if side != 0
+                        color c = side > 0 ? vpSupCol : vpResCol
+                        bx.push(box.new(left=x, top=y1, right=x + tw, bottom=y0, xloc=xloc.bar_index, border_color=c, border_width=2, bgcolor=color.new(vpCoreCol, 93)))
+        if showPoc
+            float p = bot + (poc + 0.5) * step
+            ln.push(line.new(x1=math.max(0, bar_index - 18), y1=p, x2=x, y2=p, xloc=xloc.bar_index, color=color.new(vpPocCol, 25), width=2))
+            lb.push(label.new(x=x + profW + 2, y=p, text="POC " + str.tostring(p, format.mintick), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=color.new(vpPocCol, 100), textcolor=vpPocCol, size=size.tiny))
+    0
+
+vpAvgVol = ta.sma(volume, 40)
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+vpReady = bar_index > 40 + swingLen * 2 + 5
+
+var array<SrLvl> srLvls = array.new<SrLvl>()
+var array<label> vpMLb = array.new_label()
+var array<label> vpELb = array.new_label()
+var array<label> vpPLb = array.new_label()
+var array<box>   vpPBx = array.new_box()
+var array<line>  vpTLn = array.new_line()
+
+// ONE histogram per bar, reused by the support and resistance pivots.
+if enableSR and vpReady and (not na(pl) or not na(ph))
+    int pBars = math.max(1, math.min(profLb, bar_index - swingLen + 1))
+    [pBot, pStep, pTot, pBuy] = profile(swingLen, swingLen + pBars - 1, profRows)
+    if not na(pl)
+        [storedS, scS, pS, nodeS, evidS, nStrS, pkS, dirS] = pivot_eval(srLvls, pl, true, vpAvgVol, atrLocal, pBot, pStep, pTot, pBuy)
+    if not na(ph)
+        [storedR, scR, pR, nodeR, evidR, nStrR, pkR, dirR] = pivot_eval(srLvls, ph, false, vpAvgVol, atrLocal, pBot, pStep, pTot, pBuy)
+
+if enableSR
+    [supBreak, resBreak] = manage_breaks(srLvls, atrLocal)
+    trim_lvls(srLvls)
+    update_lvls(srLvls)
+
+// Realtime drawing is refreshed once per bar instead of on every tick.
+var int vpDrawBar = na
+
+if barstate.islast and (na(vpDrawBar) or vpDrawBar != bar_index)
+    vpDrawBar := bar_index
+    clear_labels(vpMLb), clear_labels(vpELb), clear_labels(vpPLb)
+    clear_boxes(vpPBx), clear_lines(vpTLn)
+    if enableSR
+        draw_markers(srLvls, vpMLb, vpTLn)
+        draw_edge(srLvls, vpELb)
+    if enableVP
+        draw_profile(srLvls, vpPBx, vpTLn, vpPLb)
+
+// =====================================================================================================================
+// NON-OVERLAPPING LABEL LAYOUT (PDH / PDL / DO)
+// =====================================================================================================================
+layoutLabels(float tol) =>
+    arr = array.new<KeyLevel>()
+    if not na(klDO.price) and activeDO
+        arr.push(klDO)
+    if not na(klPDH.price) and activePD
+        arr.push(klPDH)
+    if not na(klPDL.price) and activePD
+        arr.push(klPDL)
+    int n = arr.size()
+    if n > 0
+        used = array.new<bool>(n, false)
+        float prev = na
+        int slot = 0
+        for k = 0 to n - 1
+            int bi = -1
+            float bv = na
+            for i = 0 to n - 1
+                if not used.get(i)
+                    float v = arr.get(i).price
+                    if na(bv) or v < bv
+                        bv := v, bi := i
+            if bi >= 0
+                used.set(bi, true)
+                if na(prev) or math.abs(bv - prev) > tol
+                    slot := 0
+                else
+                    slot += 1
+                prev := bv
+                KeyLevel L = arr.get(bi)
+                if not na(L.lb)
+                    label.set_x(L.lb, bar_index + labOffset + slot * labSpacing)
+
+if barstate.islast
+    layoutLabels(nz(atrLocal, syminfo.mintick * 10) * labTolATR)
+
+// =====================================================================================================================
+// PLOTS & ALERTS
+// =====================================================================================================================
+plot(enableEMA and showFastEma ? emaFast : na, title="Fast EMA", color=colFast, linewidth=1)
+plot(enableEMA and showSlowEma ? emaSlow : na, title="Slow EMA", color=colSlow, linewidth=1)
+
+vwapPlot = vwapBreak ? na : activeVwap
+plot(enableVwap ? vwapPlot : na, title="VWAP", color=colVwap, linewidth=1, style=plot.style_linebr)
+plot(enableHTFEMA ? htfEmaPlot1 : na, title="HTF EMA 1", color=colLevel1, linewidth=1)
+
+plotshape(crossMarkerBull, title="Bullish EMA Cross (❌)", style=shape.xcross, location=location.belowbar, color=colBull, size=size.tiny)
+plotshape(crossMarkerBear, title="Bearish EMA Cross (❌)", style=shape.xcross, location=location.abovebar, color=colBear, size=size.tiny)
+
+plotshape(buyPbSignal,  title="Pullback Swing Buy Signal",  style=shape.triangleup,   location=location.belowbar, color=colBull, size=size.small)
+plotshape(sellPbSignal, title="Pullback Swing Sell Signal", style=shape.triangledown, location=location.abovebar, color=colBear, size=size.small)
+
+plotshape(buyP3Signal,  title="P3 Re-Entry Buy",  style=shape.triangleup,   location=location.belowbar, color=cuPbBull, size=size.tiny)
+plotshape(sellP3Signal, title="P3 Re-Entry Sell", style=shape.triangledown, location=location.abovebar, color=cuPbBear, size=size.tiny)
+
+alertcondition(crossMarkerBull, title="Bullish EMA Crossover (❌)", message="DCC: Bullish EMA Crossover (❌) on {{ticker}} ({{interval}})")
+alertcondition(crossMarkerBear, title="Bearish EMA Crossover (❌)", message="DCC: Bearish EMA Crossover (❌) on {{ticker}} ({{interval}})")
+alertcondition(buyPbSignal,     title="Pullback Entry BUY",         message="DCC: Pullback Entry BUY on {{ticker}} ({{interval}}) at {{close}}")
+alertcondition(sellPbSignal,    title="Pullback Entry SELL",        message="DCC: Pullback Entry SELL on {{ticker}} ({{interval}}) at {{close}}")
+alertcondition(buyP3Signal,     title="P3 Re-Entry BUY",            message="DCC: P3 Re-Entry BUY on {{ticker}} ({{interval}}) at {{close}}")
+alertcondition(sellP3Signal,    title="P3 Re-Entry SELL",           message="DCC: P3 Re-Entry SELL on {{ticker}} ({{interval}}) at {{close}}")
+
+// =====================================================================================================================
+// TABLE RENDERING — every string is built here, only on the last bar
+// =====================================================================================================================
+posOf(string s) =>
+    switch s
+        "Top Left"      => position.top_left
+        "Top Center"    => position.top_center
+        "Top Right"     => position.top_right
+        "Middle Left"   => position.middle_left
+        "Middle Right"  => position.middle_right
+        "Bottom Left"   => position.bottom_left
+        "Bottom Center" => position.bottom_center
+        => position.bottom_right
+
+tblSizeOf(string s) =>
+    switch s
+        "Tiny"  => size.tiny
+        "Small" => size.small
+        => size.normal
+
+renderTable(array<string> labels, array<string> vals, array<color> cols, string posStr) =>
+    int n = labels.size()
+    table t = table.new(position.bottom_right, 2, n, border_width=1)
+    table.set_position(t, posOf(posStr))
+    string sz = tblSizeOf(tblTextInput)
+    for i = 0 to n - 1
+        table.cell(t, 0, i, labels.get(i), text_color=colTableText, bgcolor=colTableLabel, text_size=sz)
+        table.cell(t, 1, i, vals.get(i), text_color=cols.get(i), bgcolor=colTableValue, text_size=sz)
+    t
+
+var table tblA    = na
+var table tsmDash = na
+
+if barstate.islast
+    table.delete(tblA), tblA := na
+    table.delete(tsmDash), tsmDash := na
+
+    string biasText   = biasLong ? "LONG" : biasShort ? "SHORT" : "FLAT"
+    string calcSLStr  = isForex ? str.tostring(atrCalcPips, "#.#") + " pips" : str.tostring(atrSLDist, format.mintick) + " pts"
+    string tsmFlag    = math.abs(tsmScorePct) >= tsmMinStrength ? " ★" : ""
+    string tsmStripTx = tf1Lbl + tfArrow(composite1) + " " + tf2Lbl + tfArrow(composite2) + " " + tf3Lbl + tfArrow(composite3) + " · " + str.tostring(tsmScorePct, "#") + "%" + tsmFlag
+
+    if showTable
+        array<string> lA = array.new<string>()
+        array<string> vA = array.new<string>()
+        array<color>  cA = array.new<color>()
+
+        if enableHTFEMA or enableADX
+            string biasValStr = enableHTFEMA and enableADX ? (biasText + " · " + str.tostring(adxVal, "#.#")) : (enableHTFEMA ? biasText : str.tostring(adxVal, "#.#"))
+            string biasRowLbl = enableHTFEMA ? "BIAS" : "ADX"
+            color  biasRowCol = enableHTFEMA ? (biasLong ? colBull : biasShort ? colBear : colTableText) : colTableVal
+            lA.push(biasRowLbl), vA.push(biasValStr), cA.push(biasRowCol)
+
+        if enableTSM and tsmDisplayMode == "Compact DCC Table Row"
+            lA.push("TSM"), vA.push(tsmStripTx)
+            cA.push(tsmMtfScore > 0.2 ? colBull : tsmMtfScore < -0.2 ? colBear : colTableVal)
+
+        if enableATR
+            string liveSLPart = enableHTFEMA and not na(liveSL) ? str.tostring(liveSL, format.mintick) : "FLAT"
+            string slRowVal   = showLiveSL ? (liveSLPart + " · " + calcSLStr) : calcSLStr
+            lA.push("SL"), vA.push(slRowVal), cA.push(colTableVal)
+
+        if enableSqz
+            string sqzState = "IDLE"
+            color  sqzColor = colTableVal
+            if psi >= sqzThreshold
+                sqzState := "COMP"
+                sqzColor := cuSqzComp
+            else if psi < psi[1]
+                sqzState := "REL"
+                sqzColor := cuSqzRel
+            string sqzTxt = str.tostring(psi, "#.1") + " · " + sqzState
+            lA.push("SQZ"), vA.push(sqzTxt), cA.push(sqzColor)
+
+        if lA.size() > 0
+            tblA := renderTable(lA, vA, cA, tablePosInput)
+
+    if enableTSM and tsmDisplayMode == "Full Mobile TSM Table"
+        string mSz = tblSizeOf(tblTextInput)
+        tsmDash := table.new(posOf(tsmDashPos), 6, 5, bgcolor=color.new(#1E1E1E, 10), frame_width=1, frame_color=color.new(colTableLabel, 70), border_width=1, border_color=color.new(colTableLabel, 85))
+
+        table.cell(tsmDash, 0, 0, "TF",  text_color=colTableText, text_size=mSz, bgcolor=colTableLabel)
+        table.cell(tsmDash, 1, 0, "RSI", text_color=colTableText, text_size=mSz, bgcolor=colTableLabel)
+        table.cell(tsmDash, 2, 0, "MCD", text_color=colTableText, text_size=mSz, bgcolor=colTableLabel)
+        table.cell(tsmDash, 3, 0, "ADX", text_color=colTableText, text_size=mSz, bgcolor=colTableLabel)
+        table.cell(tsmDash, 4, 0, "MA",  text_color=colTableText, text_size=mSz, bgcolor=colTableLabel)
+        table.cell(tsmDash, 5, 0, "%",   text_color=colTableText, text_size=mSz, bgcolor=colTableLabel)
+
+        table.cell(tsmDash, 0, 1, tf1Lbl, text_color=colTableText, text_size=mSz, bgcolor=colTableValue)
+        table.cell(tsmDash, 1, 1, str.tostring(rsi1, "#"), text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(rsiScore1))
+        table.cell(tsmDash, 2, 1, macdScore1 > 0 ? "▲" : "▼", text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(macdScore1))
+        table.cell(tsmDash, 3, 1, str.tostring(adx1, "#"), text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(adxScore1))
+        table.cell(tsmDash, 4, 1, maScore1 > 0 ? "▲" : "▼", text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(maScore1))
+        table.cell(tsmDash, 5, 1, str.tostring(composite1 * 100, "#") + "%", text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(composite1))
+
+        table.cell(tsmDash, 0, 2, tf2Lbl, text_color=colTableText, text_size=mSz, bgcolor=colTableValue)
+        table.cell(tsmDash, 1, 2, str.tostring(rsi2, "#"), text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(rsiScore2))
+        table.cell(tsmDash, 2, 2, macdScore2 > 0 ? "▲" : "▼", text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(macdScore2))
+        table.cell(tsmDash, 3, 2, str.tostring(adx2, "#"), text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(adxScore2))
+        table.cell(tsmDash, 4, 2, maScore2 > 0 ? "▲" : "▼", text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(maScore2))
+        table.cell(tsmDash, 5, 2, str.tostring(composite2 * 100, "#") + "%", text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(composite2))
+
+        table.cell(tsmDash, 0, 3, tf3Lbl, text_color=colTableText, text_size=mSz, bgcolor=colTableValue)
+        table.cell(tsmDash, 1, 3, str.tostring(rsi3, "#"), text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(rsiScore3))
+        table.cell(tsmDash, 2, 3, macdScore3 > 0 ? "▲" : "▼", text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(macdScore3))
+        table.cell(tsmDash, 3, 3, str.tostring(adx3, "#"), text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(adxScore3))
+        table.cell(tsmDash, 4, 3, maScore3 > 0 ? "▲" : "▼", text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(maScore3))
+        table.cell(tsmDash, 5, 3, str.tostring(composite3 * 100, "#") + "%", text_color=color.white, text_size=mSz, bgcolor=scoreToColor_TSM(composite3))
+
+        string overallText = tsmMtfScore > 0.5 ? "STR BULL" : (tsmMtfScore > 0.2 ? "BULL" : (tsmMtfScore < -0.5 ? "STR BEAR" : (tsmMtfScore < -0.2 ? "BEAR" : "NEUT")))
+        color ovColor = tsmMtfScore > 0.2 ? colBull : (tsmMtfScore < -0.2 ? colBear : colTableVal)
+        table.cell(tsmDash, 0, 4, "MTF", text_color=colTableText, text_size=mSz, bgcolor=colTableLabel)
+        table.merge_cells(tsmDash, 1, 4, 4, 4)
+        table.cell(tsmDash, 1, 4, overallText, text_color=color.white, text_size=mSz, bgcolor=color.new(ovColor, 20))
+        table.cell(tsmDash, 5, 4, str.tostring(tsmMtfScore * 100, "#") + "%", text_color=color.white, text_size=mSz, bgcolor=color.new(ovColor, 20))
+
+
+
+

@@ -38,7 +38,21 @@ jobs:
 
       - name: Build Debug APK with Gradle
         run: |
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee build.log
+
+      - name: Display build log on failure
+        if: failure()
+        run: |
+          echo "=== BUILD LOG (LAST 250 LINES) ==="
+          tail -n 250 build.log || true
+
+      - name: Upload Build Log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-failure-log
+          path: build.log
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4

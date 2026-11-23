@@ -1,23 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.LiteCharts" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/accent_blue</item>
-        <item name="colorPrimaryVariant">@color/bg_primary</item>
-        <item name="colorOnPrimary">@color/text_primary</item>
-        <item name="colorSecondary">@color/accent_green</item>
-        <item name="colorOnSecondary">@color/text_primary</item>
-        <item name="android:colorBackground">@color/bg_primary</item>
-        <item name="colorSurface">@color/bg_secondary</item>
-        <item name="colorOnSurface">@color/text_primary</item>
-        <item name="android:statusBarColor">@color/bg_primary</item>
-        <item name="android:navigationBarColor">@color/bg_primary</item>
-        <item name="android:windowBackground">@color/bg_primary</item>
-    </style>
 
-    <!-- Dark-themed dialog for market selector -->
-    <style name="Theme.LiteCharts.Dialog" parent="ThemeOverlay.MaterialComponents.Dialog.Alert">
-        <item name="colorSurface">@color/bg_secondary</item>
-        <item name="android:textColorPrimary">@color/text_primary</item>
-        <item name="android:textColorSecondary">@color/text_secondary</item>
-    </style>
+    <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar" />
 </resources>

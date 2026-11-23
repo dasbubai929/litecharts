@@ -1,4 +1,29 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Lite Charts</string>
+    <string name="app_name">DCC Charting</string>
+    <string name="watchlist_title">Markets</string>
+    <string name="watchlist_subtitle">13 OANDA Instruments</string>
+    <string name="open_watchlist_cd">Open market watchlist</string>
+    <string name="close_watchlist_cd">Close market watchlist</string>
+    <string name="dcc_indicator_label">DCC</string>
+    <string name="dcc_settings_title">DCC Indicator Settings</string>
+    <string name="dcc_settings_cd">Open DCC indicator settings</string>
+    <string name="appearance_settings_title">Chart Appearance &amp; Theme</string>
+    <string name="appearance_settings_cd">Customize chart colors and theme</string>
+    <string name="drawing_tools_cd">Toggle drawing tools</string>
+    <string name="clear_drawings_label">Clear Drawings</string>
+    <string name="undo_drawing_cd">Undo last drawing</string>
+    <string name="reset_zoom_cd">Reset chart viewport</string>
+    <string name="refresh_chart_cd">Reload chart data</string>
+    <string name="stream_live">LIVE</string>
+    <string name="stream_connecting">SYNC</string>
+    <string name="stream_reconnecting">RETRY</string>
+    <string name="stream_offline">OFFLINE</string>
+    <string name="api_key_missing_title">OANDA API Key Required</string>
+    <string name="api_key_missing_body">Add OANDA_API_KEY in the AI Studio Secrets panel to load live OANDA Practice candles and real-time price streaming.</string>
+    <string name="retry_action">Retry</string>
+    <string name="reset_defaults_action">Reset Defaults</string>
+    <string name="done_action">Done</string>
+    <string name="cancel_drawing_action">Cancel</string>
+    <string name="drawings_cleared_message">Drawings cleared for this chart</string>
+    <string name="undo_action">Undo</string>
 </resources>

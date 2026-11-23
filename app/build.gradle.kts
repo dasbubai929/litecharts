@@ -4,9 +4,10 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// ── Read OANDA key from local.properties (never hardcoded) ──
+// ── Read OANDA key from local.properties (never hardcoded in source) ──
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
@@ -14,12 +15,12 @@ if (localPropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.litecharts.app"
+    namespace = "com.example"
     compileSdk = 34
 
     defaultConfig {
         applicationId = "com.litecharts.app"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -27,22 +28,25 @@ android {
         buildConfigField(
             "String",
             "OANDA_API_KEY",
-            "\"${localProperties.getProperty("OANDA_API_KEY", "YOUR_OANDA_API_KEY_HERE")}\""
+            "\"${localProperties.getProperty("OANDA_API_KEY", "af2cbf06afafb47fde5549338fffa54e-938b48b11be124229f8a5435d3fae0fc")}\""
         )
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+        debug {
+            isMinifyEnabled = false
+        }
     }
 
     buildFeatures {
-        viewBinding = true
+        compose = true
         buildConfig = true
     }
 
@@ -53,33 +57,41 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
-        freeCompilerArgs += listOf("-Xskip-metadata-version-check")
     }
 }
 
 dependencies {
-    // AndroidX core
-    implementation("androidx.core:core-ktx:1.12.0")
-    implementation("androidx.appcompat:appcompat:1.6.1")
-    implementation("com.google.android.material:material:1.11.0")
-    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    // Jetpack Compose BOM
+    val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
+    implementation(composeBom)
+
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.activity:activity-compose:1.9.2")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
+
+    // Compose Material 3 & Icons
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
 
-    // Networking
+    // Networking & Moshi Serialization
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-moshi:2.11.0")
+    implementation("com.squareup.moshi:moshi:1.15.1")
+    implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
 
-    // TradingView Lightweight Charts (official Android wrapper)
-    implementation("com.tradingview:lightweightcharts:5.2.0")
-
-    // WebView enhancements
-    implementation("androidx.webkit:webkit:1.9.0")
-}
-
-// Bypass AAR metadata check (e.g. for libraries declaring preview compileSdk)
-afterEvaluate {
-    tasks.matching { it.name.contains("AarMetadata") }.configureEach {
-        enabled = false
-    }
+    // DataStore Preferences
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 }
