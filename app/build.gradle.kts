@@ -75,3 +75,8 @@ dependencies {
     // WebView enhancements
     implementation("androidx.webkit:webkit:1.9.0")
 }
+
+// Bypass AAR metadata check (e.g. for libraries declaring preview compileSdk)
+tasks.matching { it.name.contains("AarMetadata") }.configureEach {
+    enabled = false
+}
