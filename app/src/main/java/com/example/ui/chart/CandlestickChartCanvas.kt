@@ -30,7 +30,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -106,12 +108,18 @@ fun CandlestickChartCanvas(
     val plotTopPadPx = with(density) { 24.dp.toPx() }
     val plotBotPadPx = with(density) { 16.dp.toPx() }
 
+    var isAutoScale by remember { mutableStateOf(false) }
+    var userPriceCenter by remember { mutableDoubleStateOf(Double.NaN) }
+    var userPriceSpan by remember { mutableDoubleStateOf(Double.NaN) }
     var barSpacingPx by remember { mutableFloatStateOf(defaultBarSpacingPx) }
     var rightOffsetBars by remember { mutableFloatStateOf(14f) }
 
-    LaunchedEffect(viewportResetSignal) {
+    LaunchedEffect(viewportResetSignal, instrument.id, timeframe) {
         barSpacingPx = defaultBarSpacingPx
         rightOffsetBars = if (dccSettings.masterEnabled && dccSettings.enableVP) 16f else 8f
+        userPriceCenter = Double.NaN
+        userPriceSpan = Double.NaN
+        isAutoScale = false
     }
 
     val customOverlays = remember(customResults) {
@@ -137,23 +145,74 @@ fun CandlestickChartCanvas(
                 modifier = Modifier
                     .fillMaxSize()
                     .testTag("candlestick_chart_canvas")
-                    .pointerInput(candles, activeTool, timeframe) {
-                        detectTransformGestures { _, pan, zoom, _ ->
+                    .pointerInput(candles, activeTool, timeframe, isAutoScale) {
+                        detectTransformGestures { centroid, pan, zoom, _ ->
                             if (candles.isEmpty()) return@detectTransformGestures
-                            if (zoom != 1f) {
-                                barSpacingPx = (barSpacingPx * zoom).coerceIn(minBarSpacingPx, maxBarSpacingPx)
-                            }
-                            if (pan.x != 0f) {
-                                val deltaBars = pan.x / barSpacingPx
-                                val minRightOffset = -(candles.size - 5).coerceAtLeast(0).toFloat()
-                                val maxRightOffset = 65f
-                                rightOffsetBars = (rightOffsetBars - deltaBars).coerceIn(minRightOffset, maxRightOffset)
+                            val plotW = (size.width - rightAxisWidthPx).coerceAtLeast(1f)
+                            val plotH = (size.height - bottomAxisHeightPx).coerceAtLeast(1f)
+
+                            if (centroid.x >= plotW) {
+                                // Touch is on the right price scale: stretch or compress candle height!
+                                if (pan.y != 0f) {
+                                    val currentSpan = if (!userPriceSpan.isNaN() && userPriceSpan > 0.0) userPriceSpan else 0.01
+                                    val factor = 1.0 + (pan.y / 200f).toDouble()
+                                    userPriceSpan = (currentSpan * factor).coerceIn(1e-7, 1e8)
+                                    isAutoScale = false
+                                }
+                            } else if (centroid.y >= plotH) {
+                                // Touch is on the bottom time scale: stretch or compress bar spacing!
+                                if (pan.x != 0f) {
+                                    val factor = 1f + (pan.x / 180f)
+                                    barSpacingPx = (barSpacingPx * factor).coerceIn(minBarSpacingPx, maxBarSpacingPx)
+                                }
+                            } else {
+                                // Touch is on the main chart area: free 2D pan and zoom!
+                                if (zoom != 1f) {
+                                    barSpacingPx = (barSpacingPx * zoom).coerceIn(minBarSpacingPx, maxBarSpacingPx)
+                                }
+                                if (pan.x != 0f) {
+                                    val deltaBars = pan.x / barSpacingPx
+                                    val minRightOffset = -(candles.size - 5).coerceAtLeast(0).toFloat()
+                                    val maxRightOffset = 70f
+                                    rightOffsetBars = (rightOffsetBars - deltaBars).coerceIn(minRightOffset, maxRightOffset)
+                                }
+                                if (pan.y != 0f) {
+                                    val currentSpan = if (!userPriceSpan.isNaN() && userPriceSpan > 0.0) userPriceSpan else 0.01
+                                    val usableHeight = (plotH - plotTopPadPx - plotBotPadPx).coerceAtLeast(1f)
+                                    val deltaPrice = (pan.y / usableHeight).toDouble() * currentSpan
+                                    userPriceCenter += deltaPrice
+                                    isAutoScale = false
+                                }
                             }
                         }
                     }
-                    .pointerInput(candles, activeTool, pendingAnchor, timeframe) {
+                    .pointerInput(candles, activeTool, pendingAnchor, timeframe, isAutoScale) {
                         detectTapGestures(
+                            onDoubleTap = { offset ->
+                                val plotW = (size.width - rightAxisWidthPx).coerceAtLeast(1f)
+                                val plotH = (size.height - bottomAxisHeightPx).coerceAtLeast(1f)
+                                if (offset.x >= plotW) {
+                                    // Double tap on price scale resets to auto fit
+                                    isAutoScale = true
+                                } else if (offset.y >= plotH) {
+                                    // Double tap on time scale resets horizontal zoom
+                                    barSpacingPx = defaultBarSpacingPx
+                                } else {
+                                    // Double tap on chart resets all
+                                    isAutoScale = true
+                                    barSpacingPx = defaultBarSpacingPx
+                                    rightOffsetBars = if (dccSettings.masterEnabled && dccSettings.enableVP) 16f else 8f
+                                }
+                            },
                             onTap = { offset ->
+                                val plotW = (size.width - rightAxisWidthPx).coerceAtLeast(1f)
+                                val plotH = (size.height - bottomAxisHeightPx).coerceAtLeast(1f)
+                                // Tap on the [A] auto badge at bottom of right axis
+                                if (offset.x >= plotW && offset.y in (plotH - 36f)..plotH) {
+                                    isAutoScale = !isAutoScale
+                                    return@detectTapGestures
+                                }
+
                                 val mapper = latestMapperHolder[0] ?: return@detectTapGestures
                                 if (offset.x > mapper.plotWidth || offset.y > mapper.plotHeight) return@detectTapGestures
                                 if (activeTool != DrawingTool.CURSOR) {
@@ -176,6 +235,27 @@ fun CandlestickChartCanvas(
                 val plotWidth = (size.width - rightAxisWidthPx).coerceAtLeast(1f)
                 val plotHeight = (size.height - bottomAxisHeightPx).coerceAtLeast(1f)
 
+                val autoBounds = ChartCoordinateMapper.computeAutoBounds(
+                    candles = candles,
+                    dccResult = dccResult,
+                    includeDccBounds = dccSettings.masterEnabled && (dccSettings.enableEMA || dccSettings.enableVwap || dccSettings.enableHTFEMA),
+                    customOverlays = customOverlays,
+                    plotWidth = plotWidth,
+                    barSpacingPx = barSpacingPx,
+                    rightOffsetBars = rightOffsetBars
+                )
+
+                if (userPriceCenter.isNaN() || userPriceSpan.isNaN()) {
+                    userPriceCenter = (autoBounds.second + autoBounds.first) / 2.0
+                    userPriceSpan = (autoBounds.second - autoBounds.first).coerceAtLeast(1e-8)
+                } else if (isAutoScale) {
+                    userPriceCenter = (autoBounds.second + autoBounds.first) / 2.0
+                    userPriceSpan = (autoBounds.second - autoBounds.first).coerceAtLeast(1e-8)
+                }
+
+                val effMinPrice = userPriceCenter - userPriceSpan / 2.0
+                val effMaxPrice = userPriceCenter + userPriceSpan / 2.0
+
                 val mapper = ChartCoordinateMapper.build(
                     candles = candles,
                     dccResult = dccResult,
@@ -187,7 +267,9 @@ fun CandlestickChartCanvas(
                     topPadding = plotTopPadPx,
                     bottomPadding = plotBotPadPx,
                     barSpacingPx = barSpacingPx,
-                    rightOffsetBars = rightOffsetBars
+                    rightOffsetBars = rightOffsetBars,
+                    customMinPrice = effMinPrice,
+                    customMaxPrice = effMaxPrice
                 )
                 latestMapperHolder[0] = mapper
 
@@ -198,7 +280,7 @@ fun CandlestickChartCanvas(
                     color = appearance.textSecondaryArgb.toComposeColor().toArgb()
                 }
 
-                // 1. Gridlines & Price/Time Axes
+                // 1. Gridlines & Price/Time Axes with TradingView styling & [A] badge
                 drawGridAndAxes(
                     mapper = mapper,
                     appearance = appearance,
@@ -206,7 +288,9 @@ fun CandlestickChartCanvas(
                     timeframe = timeframe,
                     axisPaint = axisPaint,
                     rightAxisWidthPx = rightAxisWidthPx,
-                    bottomAxisHeightPx = bottomAxisHeightPx
+                    bottomAxisHeightPx = bottomAxisHeightPx,
+                    isAutoScale = isAutoScale,
+                    quoteCurrency = instrument.id.substringAfter('_', "USD")
                 )
 
                 // 2. Clipped plot layers
@@ -258,7 +342,7 @@ fun CandlestickChartCanvas(
                         rightAxisWidthPx = rightAxisWidthPx
                     )
 
-                    // Crosshair guide
+                    // Crosshair guide and axis tags
                     if (crosshairBarIndex != null && crosshairBarIndex in candles.indices) {
                         val c = candles[crosshairBarIndex]
                         val cx = mapper.indexToX(crosshairBarIndex.toFloat())
@@ -268,6 +352,57 @@ fun CandlestickChartCanvas(
                         drawLine(crossColor, Offset(cx, 0f), Offset(cx, plotHeight), strokeWidth = 1.6f, pathEffect = dash)
                         drawLine(crossColor, Offset(0f, cy), Offset(plotWidth, cy), strokeWidth = 1.6f, pathEffect = dash)
                         drawCircle(appearance.primaryAccentArgb.toComposeColor(), radius = 5.5f, center = Offset(cx, cy))
+
+                        // Crosshair tag on right price axis
+                        val pillH = 32f
+                        val pillW = rightAxisWidthPx - 6f
+                        drawRoundRect(
+                            color = Color(0xFF141416),
+                            topLeft = Offset(plotWidth + 3f, cy - pillH / 2f),
+                            size = Size(pillW, pillH),
+                            cornerRadius = CornerRadius(6f, 6f)
+                        )
+                        drawIntoCanvas { canvas ->
+                            val chPaint = Paint().apply {
+                                isAntiAlias = true
+                                textSize = 25f
+                                typeface = monoTypeface
+                                color = 0xFFFFFFFF.toInt()
+                                textAlign = Paint.Align.CENTER
+                            }
+                            canvas.nativeCanvas.drawText(
+                                "+ " + formatPrice(c.close, instrument.decimals),
+                                plotWidth + rightAxisWidthPx / 2f,
+                                cy + 8f,
+                                chPaint
+                            )
+                        }
+
+                        // Crosshair tag on bottom time axis
+                        val timePillW = 150f
+                        val timePillH = 26f
+                        val timePillLeft = (cx - timePillW / 2f).coerceIn(4f, plotWidth - timePillW - 4f)
+                        drawRoundRect(
+                            color = Color(0xFF141416),
+                            topLeft = Offset(timePillLeft, plotHeight + 1f),
+                            size = Size(timePillW, timePillH),
+                            cornerRadius = CornerRadius(5f, 5f)
+                        )
+                        drawIntoCanvas { canvas ->
+                            val chTimePaint = Paint().apply {
+                                isAntiAlias = true
+                                textSize = 22f
+                                typeface = monoTypeface
+                                color = 0xFFFFFFFF.toInt()
+                                textAlign = Paint.Align.CENTER
+                            }
+                            canvas.nativeCanvas.drawText(
+                                ChartTimeFormatter.formatHudTimestamp(c.timeEpochSec),
+                                timePillLeft + timePillW / 2f,
+                                plotHeight + 19f,
+                                chTimePaint
+                            )
+                        }
                     }
                 }
 
@@ -286,7 +421,28 @@ fun CandlestickChartCanvas(
                     )
                 }
 
-                // 4. Live price line & right-axis pill
+                // 4. Indicator level price pills on right axis
+                if (dccSettings.masterEnabled && candles.isNotEmpty()) {
+                    val lastIdx = candles.size - 1
+                    val fastEma = dccResult.emaFast.getOrNull(lastIdx)
+                    if (dccSettings.enableEMA && dccSettings.showFastEma && fastEma != null && fastEma.isFinite()) {
+                        drawAxisIndicatorPill(mapper, fastEma, dccSettings.cuFast.toComposeColor(), instrument.decimals, plotWidth, rightAxisWidthPx, monoTypeface)
+                    }
+                    val slowEma = dccResult.emaSlow.getOrNull(lastIdx)
+                    if (dccSettings.enableEMA && dccSettings.showSlowEma && slowEma != null && slowEma.isFinite()) {
+                        drawAxisIndicatorPill(mapper, slowEma, dccSettings.cuSlow.toComposeColor(), instrument.decimals, plotWidth, rightAxisWidthPx, monoTypeface)
+                    }
+                    val vwap = dccResult.vwap.getOrNull(lastIdx)
+                    if (dccSettings.enableVwap && vwap != null && vwap.isFinite()) {
+                        drawAxisIndicatorPill(mapper, vwap, dccSettings.cuVwap.toComposeColor(), instrument.decimals, plotWidth, rightAxisWidthPx, monoTypeface)
+                    }
+                    val htfEma1 = dccResult.htfEma1.getOrNull(lastIdx)
+                    if (dccSettings.enableHTFEMA && htfEma1 != null && htfEma1.isFinite()) {
+                        drawAxisIndicatorPill(mapper, htfEma1, dccSettings.cuHtfEma1.toComposeColor(), instrument.decimals, plotWidth, rightAxisWidthPx, monoTypeface)
+                    }
+                }
+
+                // 5. Live price line & right-axis pill with countdown timer
                 val activePrice = liveQuote?.mid ?: candles.lastOrNull()?.close
                 if (activePrice != null) {
                     val py = mapper.priceToY(activePrice).coerceIn(16f, plotHeight - 16f)
@@ -303,21 +459,42 @@ fun CandlestickChartCanvas(
                         strokeWidth = 1.8f,
                         pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
                     )
-                    val pillH = 36f
+                    val pillH = 42f
                     drawRoundRect(
                         color = pillColor,
                         topLeft = Offset(plotWidth + 3f, py - pillH / 2f),
                         size = Size(rightAxisWidthPx - 6f, pillH),
                         cornerRadius = CornerRadius(6f, 6f)
                     )
+
+                    val nowSec = System.currentTimeMillis() / 1000L
+                    val lastCandleTime = candles.lastOrNull()?.timeEpochSec ?: nowSec
+                    val candleCloseTime = lastCandleTime + timeframe.durationSec
+                    val remainingSec = (candleCloseTime - nowSec).coerceAtLeast(0L)
+                    val countdownStr = String.format(java.util.Locale.US, "%02d:%02d", remainingSec / 60, remainingSec % 60)
+
                     drawIntoCanvas { canvas ->
-                        axisPaint.color = 0xFF071014.toInt()
+                        axisPaint.color = 0xFFFFFFFF.toInt()
                         axisPaint.textAlign = Paint.Align.CENTER
+                        axisPaint.textSize = 23f
                         canvas.nativeCanvas.drawText(
                             formatPrice(activePrice, instrument.decimals),
                             plotWidth + rightAxisWidthPx / 2f,
-                            py + 9f,
+                            py - 2f,
                             axisPaint
+                        )
+                        val cdPaint = Paint().apply {
+                            isAntiAlias = true
+                            textSize = 19f
+                            typeface = monoTypeface
+                            color = 0xEEFFFFFF.toInt()
+                            textAlign = Paint.Align.CENTER
+                        }
+                        canvas.nativeCanvas.drawText(
+                            countdownStr,
+                            plotWidth + rightAxisWidthPx / 2f,
+                            py + 16f,
+                            cdPaint
                         )
                     }
                 }
@@ -438,6 +615,42 @@ fun CandlestickChartCanvas(
     }
 }
 
+private fun DrawScope.drawAxisIndicatorPill(
+    mapper: ChartCoordinateMapper,
+    price: Double,
+    color: androidx.compose.ui.graphics.Color,
+    decimals: Int,
+    plotWidth: Float,
+    rightAxisWidthPx: Float,
+    monoTypeface: Typeface
+) {
+    val y = mapper.priceToY(price)
+    if (y < 30f || y > mapper.plotHeight - 28f) return
+    val pillH = 24f
+    val pillW = rightAxisWidthPx - 6f
+    drawRoundRect(
+        color = color,
+        topLeft = Offset(plotWidth + 3f, y - pillH / 2f),
+        size = Size(pillW, pillH),
+        cornerRadius = CornerRadius(5f, 5f)
+    )
+    drawIntoCanvas { canvas ->
+        val pillPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 20f
+            typeface = monoTypeface
+            color = 0xFFFFFFFF.toInt()
+            textAlign = Paint.Align.CENTER
+        }
+        canvas.nativeCanvas.drawText(
+            formatPrice(price, decimals),
+            plotWidth + rightAxisWidthPx / 2f,
+            y + 6.5f,
+            pillPaint
+        )
+    }
+}
+
 private fun DrawScope.drawGridAndAxes(
     mapper: ChartCoordinateMapper,
     appearance: ChartAppearance,
@@ -445,7 +658,9 @@ private fun DrawScope.drawGridAndAxes(
     timeframe: Timeframe,
     axisPaint: Paint,
     rightAxisWidthPx: Float,
-    bottomAxisHeightPx: Float
+    bottomAxisHeightPx: Float,
+    isAutoScale: Boolean,
+    quoteCurrency: String
 ) {
     val borderColor = appearance.borderArgb.toComposeColor()
     val gridColor = appearance.gridColorArgb.toComposeColor().copy(alpha = appearance.gridAlpha)
@@ -453,12 +668,89 @@ private fun DrawScope.drawGridAndAxes(
     drawLine(borderColor, Offset(mapper.plotWidth, 0f), Offset(mapper.plotWidth, mapper.plotHeight), 1.5f)
     drawLine(borderColor, Offset(0f, mapper.plotHeight), Offset(size.width, mapper.plotHeight), 1.5f)
 
+    // TradingView subtle watermark at bottom left
+    drawIntoCanvas { canvas ->
+        val wmPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 28f
+            typeface = axisPaint.typeface
+            color = appearance.textSecondaryArgb.toComposeColor().toArgb()
+            alpha = 55
+        }
+        canvas.nativeCanvas.drawText("17 TradingView", 20f, mapper.plotHeight - 14f, wmPaint)
+    }
+
+    // Currency badge at top of right price scale
+    val currPillW = rightAxisWidthPx - 16f
+    val currPillH = 22f
+    val currTop = 6f
+    val currLeft = mapper.plotWidth + 8f
+    drawRoundRect(
+        color = appearance.surfaceElevatedArgb.toComposeColor(),
+        topLeft = Offset(currLeft, currTop),
+        size = Size(currPillW, currPillH),
+        cornerRadius = CornerRadius(5f, 5f)
+    )
+    drawIntoCanvas { canvas ->
+        val pillTextPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 20f
+            typeface = axisPaint.typeface
+            textAlign = Paint.Align.CENTER
+            color = appearance.textSecondaryArgb.toComposeColor().toArgb()
+        }
+        canvas.nativeCanvas.drawText(
+            quoteCurrency,
+            currLeft + currPillW / 2f,
+            currTop + 16f,
+            pillTextPaint
+        )
+    }
+
+    // [A] Auto-fit button badge at bottom of right price scale
+    val autoPillW = rightAxisWidthPx - 16f
+    val autoPillH = 22f
+    val autoTop = mapper.plotHeight - 26f
+    val autoLeft = mapper.plotWidth + 8f
+    val autoBg = if (isAutoScale) {
+        appearance.primaryAccentArgb.toComposeColor()
+    } else {
+        appearance.surfaceElevatedArgb.toComposeColor().copy(alpha = 0.85f)
+    }
+    val autoTextColor = if (isAutoScale) {
+        0xFFFFFFFF.toInt()
+    } else {
+        appearance.textSecondaryArgb.toComposeColor().toArgb()
+    }
+    drawRoundRect(
+        color = autoBg,
+        topLeft = Offset(autoLeft, autoTop),
+        size = Size(autoPillW, autoPillH),
+        cornerRadius = CornerRadius(5f, 5f)
+    )
+    drawIntoCanvas { canvas ->
+        val autoPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 21f
+            typeface = axisPaint.typeface
+            textAlign = Paint.Align.CENTER
+            color = autoTextColor
+            isFakeBoldText = isAutoScale
+        }
+        canvas.nativeCanvas.drawText(
+            "A",
+            autoLeft + autoPillW / 2f,
+            autoTop + 16f,
+            autoPaint
+        )
+    }
+
     val horizontalSteps = 6
     val priceStep = (mapper.maxPrice - mapper.minPrice) / horizontalSteps
     for (i in 0..horizontalSteps) {
         val price = mapper.maxPrice - i * priceStep
         val y = mapper.priceToY(price)
-        if (y < 14f || y > mapper.plotHeight - 10f) continue
+        if (y < 28f || y > mapper.plotHeight - 28f) continue
 
         if (appearance.showGrid) {
             drawLine(gridColor, Offset(0f, y), Offset(mapper.plotWidth, y), 1f)

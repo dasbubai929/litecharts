@@ -3,6 +3,7 @@ package com.example.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,6 +64,7 @@ import com.example.ui.components.DccSettingsSheet
 import com.example.ui.components.DrawingToolsRail
 import com.example.ui.components.TopTradingBar
 import com.example.ui.components.WatchlistPanel
+import com.example.ui.theme.toComposeColor
 import com.example.ui.viewmodel.ChartUiState
 import com.example.ui.viewmodel.ChartViewModel
 import kotlinx.coroutines.launch
@@ -78,9 +81,14 @@ fun ChartingTerminalScreen(
     var showDccSettings by rememberSaveable { mutableStateOf(false) }
     var showCustomIndicators by rememberSaveable { mutableStateOf(false) }
     var showAppearanceSettings by rememberSaveable { mutableStateOf(false) }
+    var isFullscreen by rememberSaveable { mutableStateOf(false) }
 
     val clearedMessage = stringResource(R.string.drawings_cleared_message)
     val undoLabel = stringResource(R.string.undo_action)
+
+    BackHandler(enabled = isFullscreen) {
+        isFullscreen = false
+    }
 
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
@@ -140,38 +148,44 @@ fun ChartingTerminalScreen(
                     }
 
                     Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                        TopTradingBar(
-                            instrument = uiState.selectedInstrument,
-                            selectedTimeframe = uiState.selectedTimeframe,
-                            liveQuote = uiState.liveQuote,
-                            lastCandleClose = uiState.candles.lastOrNull()?.close,
-                            streamStatus = uiState.streamStatus,
-                            dccEnabled = uiState.dccSettings.masterEnabled,
-                            customIndicatorCount = uiState.customIndicators.size,
-                            showWatchlistMenuButton = !isExpandedLayout,
-                            onOpenWatchlist = { scope.launch { drawerState.open() } },
-                            onSelectTimeframe = viewModel::selectTimeframe,
-                            onToggleDcc = viewModel::toggleDccOverlay,
-                            onOpenDccSettings = { showDccSettings = true },
-                            onOpenCustomIndicators = { showCustomIndicators = true },
-                            onOpenAppearanceSettings = { showAppearanceSettings = true },
-                            onRefresh = viewModel::reloadChart
-                        )
+                        if (!isFullscreen) {
+                            TopTradingBar(
+                                instrument = uiState.selectedInstrument,
+                                selectedTimeframe = uiState.selectedTimeframe,
+                                liveQuote = uiState.liveQuote,
+                                lastCandleClose = uiState.candles.lastOrNull()?.close,
+                                streamStatus = uiState.streamStatus,
+                                dccEnabled = uiState.dccSettings.masterEnabled,
+                                customIndicatorCount = uiState.customIndicators.size,
+                                showWatchlistMenuButton = !isExpandedLayout,
+                                isFullscreen = isFullscreen,
+                                onToggleFullscreen = { isFullscreen = !isFullscreen },
+                                onOpenWatchlist = { scope.launch { drawerState.open() } },
+                                onSelectTimeframe = viewModel::selectTimeframe,
+                                onToggleDcc = viewModel::toggleDccOverlay,
+                                onOpenDccSettings = { showDccSettings = true },
+                                onOpenCustomIndicators = { showCustomIndicators = true },
+                                onOpenAppearanceSettings = { showAppearanceSettings = true },
+                                onRefresh = viewModel::reloadChart
+                            )
+                        }
 
                         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                            DrawingToolsRail(
-                                activeTool = uiState.activeTool,
-                                drawingCount = uiState.drawings.size,
-                                hasPendingAnchor = uiState.pendingAnchor != null,
-                                onSelectTool = viewModel::selectDrawingTool,
-                                onUndo = viewModel::undoLastDrawing,
-                                onClearDrawings = handleClearDrawings
-                            )
+                            if (!isFullscreen) {
+                                DrawingToolsRail(
+                                    activeTool = uiState.activeTool,
+                                    drawingCount = uiState.drawings.size,
+                                    hasPendingAnchor = uiState.pendingAnchor != null,
+                                    onSelectTool = viewModel::selectDrawingTool,
+                                    onUndo = viewModel::undoLastDrawing,
+                                    onClearDrawings = handleClearDrawings
+                                )
 
-                            VerticalDivider(
-                                color = MaterialTheme.colorScheme.outline,
-                                thickness = 1.dp
-                            )
+                                VerticalDivider(
+                                    color = MaterialTheme.colorScheme.outline,
+                                    thickness = 1.dp
+                                )
+                            }
 
                             Box(
                                 modifier = Modifier
@@ -227,6 +241,41 @@ fun ChartingTerminalScreen(
                                                     .padding(top = 12.dp, end = 86.dp)
                                                     .size(20.dp)
                                             )
+                                        }
+
+                                        if (isFullscreen) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(top = 10.dp, end = 84.dp)
+                                                    .clip(RoundedCornerShape(20.dp))
+                                                    .background(uiState.appearance.surfaceElevatedArgb.toComposeColor().copy(alpha = 0.90f))
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = uiState.appearance.borderArgb.toComposeColor(),
+                                                        shape = RoundedCornerShape(20.dp)
+                                                    )
+                                                    .clickable { isFullscreen = false }
+                                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                                    .testTag("exit_fullscreen_button")
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.FullscreenExit,
+                                                        contentDescription = "Exit Fullscreen",
+                                                        tint = uiState.appearance.textPrimaryArgb.toComposeColor(),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Text(
+                                                        text = "Exit",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = uiState.appearance.textPrimaryArgb.toComposeColor()
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }

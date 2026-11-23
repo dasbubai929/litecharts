@@ -27,9 +27,12 @@ class ChartCoordinateMapper(
     val minPrice: Double,
     val maxPrice: Double
 ) {
-    private val lastIndex: Int = (candles.size - 1).coerceAtLeast(0)
-    private val usableHeight: Float = (plotHeight - topPadding - bottomPadding).coerceAtLeast(1f)
-    private val priceSpan: Double = (maxPrice - minPrice).coerceAtLeast(1e-8)
+    val lastIndex: Int = (candles.size - 1).coerceAtLeast(0)
+    val usableHeight: Float = (plotHeight - topPadding - bottomPadding).coerceAtLeast(1f)
+    val priceSpan: Double = (maxPrice - minPrice).coerceAtLeast(1e-8)
+    val centerPrice: Double get() = (maxPrice + minPrice) / 2.0
+    val priceSpanValue: Double get() = priceSpan
+    val usableHeightPx: Float get() = usableHeight
 
     fun indexToX(barIndex: Float): Float {
         return plotWidth - (lastIndex - barIndex + rightOffsetBars) * barSpacingPx
@@ -118,19 +121,15 @@ class ChartCoordinateMapper(
     }
 
     companion object {
-        fun build(
+        fun computeAutoBounds(
             candles: List<Candle>,
             dccResult: com.example.indicators.DccMasterResult,
             includeDccBounds: Boolean,
             customOverlays: List<com.example.indicators.PineEvaluationResult>,
-            timeframe: Timeframe,
             plotWidth: Float,
-            plotHeight: Float,
-            topPadding: Float,
-            bottomPadding: Float,
             barSpacingPx: Float,
             rightOffsetBars: Float
-        ): ChartCoordinateMapper {
+        ): Pair<Double, Double> {
             val lastIdx = (candles.size - 1).coerceAtLeast(0)
             val approxLeft = floor(lastIdx + rightOffsetBars - plotWidth / barSpacingPx)
                 .toInt().coerceIn(0, lastIdx)
@@ -146,16 +145,18 @@ class ChartCoordinateMapper(
                     minP = min(minP, c.low)
                     maxP = max(maxP, c.high)
                     if (includeDccBounds) {
-                        dccResult.emaFast.getOrNull(i)?.let { minP = min(minP, it); maxP = max(maxP, it) }
-                        dccResult.emaSlow.getOrNull(i)?.let { minP = min(minP, it); maxP = max(maxP, it) }
-                        dccResult.vwap.getOrNull(i)?.let { minP = min(minP, it); maxP = max(maxP, it) }
-                        dccResult.htfEma1.getOrNull(i)?.let { minP = min(minP, it); maxP = max(maxP, it) }
+                        dccResult.emaFast.getOrNull(i)?.let { if (it.isFinite()) { minP = min(minP, it); maxP = max(maxP, it) } }
+                        dccResult.emaSlow.getOrNull(i)?.let { if (it.isFinite()) { minP = min(minP, it); maxP = max(maxP, it) } }
+                        dccResult.vwap.getOrNull(i)?.let { if (it.isFinite()) { minP = min(minP, it); maxP = max(maxP, it) } }
+                        dccResult.htfEma1.getOrNull(i)?.let { if (it.isFinite()) { minP = min(minP, it); maxP = max(maxP, it) } }
                     }
                     for (ov in customOverlays) {
                         for (plot in ov.plots) {
                             plot.values.getOrNull(i)?.let {
-                                minP = min(minP, it)
-                                maxP = max(maxP, it)
+                                if (it.isFinite()) {
+                                    minP = min(minP, it)
+                                    maxP = max(maxP, it)
+                                }
                             }
                         }
                     }
@@ -169,6 +170,46 @@ class ChartCoordinateMapper(
                 val pad = (maxP - minP) * 0.10
                 minP -= pad
                 maxP += pad
+            }
+            return Pair(minP, maxP)
+        }
+
+        fun build(
+            candles: List<Candle>,
+            dccResult: com.example.indicators.DccMasterResult,
+            includeDccBounds: Boolean,
+            customOverlays: List<com.example.indicators.PineEvaluationResult>,
+            timeframe: Timeframe,
+            plotWidth: Float,
+            plotHeight: Float,
+            topPadding: Float,
+            bottomPadding: Float,
+            barSpacingPx: Float,
+            rightOffsetBars: Float,
+            customMinPrice: Double? = null,
+            customMaxPrice: Double? = null
+        ): ChartCoordinateMapper {
+            val minP: Double
+            val maxP: Double
+
+            if (customMinPrice != null && customMaxPrice != null &&
+                customMinPrice.isFinite() && customMaxPrice.isFinite() &&
+                customMaxPrice > customMinPrice
+            ) {
+                minP = customMinPrice
+                maxP = customMaxPrice
+            } else {
+                val autoBounds = computeAutoBounds(
+                    candles = candles,
+                    dccResult = dccResult,
+                    includeDccBounds = includeDccBounds,
+                    customOverlays = customOverlays,
+                    plotWidth = plotWidth,
+                    barSpacingPx = barSpacingPx,
+                    rightOffsetBars = rightOffsetBars
+                )
+                minP = autoBounds.first
+                maxP = autoBounds.second
             }
 
             return ChartCoordinateMapper(
