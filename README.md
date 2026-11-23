@@ -146,3 +146,28 @@ Or from terminal:
 ```bash
 ./gradlew assembleDebug
 ```
+
+---
+
+## Compiling with GitHub Actions (Cloud CI/CD)
+
+The repository includes a ready-to-use GitHub Actions workflow in [`.github/workflows/build.yml`](.github/workflows/build.yml).
+
+### How to Build & Download the APK:
+1. Every `git push` to `main` automatically triggers the build.
+2. You can also trigger it manually:
+   - Go to your repository on GitHub: [https://github.com/dasbubai929/litecharts](https://github.com/dasbubai929/litecharts)
+   - Click the **Actions** tab at the top.
+   - Select **Build Android APK** from the workflows list on the left.
+   - Click **Run workflow** > **Run workflow**.
+3. Once the workflow finishes (typically ~1-2 minutes):
+   - Click on the completed workflow run.
+   - Scroll down to the **Artifacts** section at the bottom of the page.
+   - Click **LiteCharts-debug-apk** to download the compiled `.apk` directly to your phone or computer.
+
+### Optional: Setting your Secret API Key in GitHub
+To change your API key in GitHub Actions:
+1. Go to repository **Settings** > **Secrets and variables** > **Actions**.
+2. Click **New repository secret**.
+3. Set Name to `OANDA_API_KEY` and Value to your token.
+*(If omitted, it automatically falls back to your configured practice key).*
