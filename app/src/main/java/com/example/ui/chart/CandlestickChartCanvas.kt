@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -438,7 +439,7 @@ fun CandlestickChartCanvas(
                     }
                     val htfEma1 = dccResult.htfEma1.getOrNull(lastIdx)
                     if (dccSettings.enableHTFEMA && htfEma1 != null && htfEma1.isFinite()) {
-                        drawAxisIndicatorPill(mapper, htfEma1, dccSettings.cuHtfEma1.toComposeColor(), instrument.decimals, plotWidth, rightAxisWidthPx, monoTypeface)
+                        drawAxisIndicatorPill(mapper, htfEma1, dccSettings.cuLevel1.toComposeColor(), instrument.decimals, plotWidth, rightAxisWidthPx, monoTypeface)
                     }
                 }
 
@@ -618,7 +619,7 @@ fun CandlestickChartCanvas(
 private fun DrawScope.drawAxisIndicatorPill(
     mapper: ChartCoordinateMapper,
     price: Double,
-    color: androidx.compose.ui.graphics.Color,
+    pillBgColor: Color,
     decimals: Int,
     plotWidth: Float,
     rightAxisWidthPx: Float,
@@ -629,7 +630,7 @@ private fun DrawScope.drawAxisIndicatorPill(
     val pillH = 24f
     val pillW = rightAxisWidthPx - 6f
     drawRoundRect(
-        color = color,
+        color = pillBgColor,
         topLeft = Offset(plotWidth + 3f, y - pillH / 2f),
         size = Size(pillW, pillH),
         cornerRadius = CornerRadius(5f, 5f)
@@ -639,7 +640,7 @@ private fun DrawScope.drawAxisIndicatorPill(
             isAntiAlias = true
             textSize = 20f
             typeface = monoTypeface
-            color = 0xFFFFFFFF.toInt()
+            this.color = 0xFFFFFFFF.toInt()
             textAlign = Paint.Align.CENTER
         }
         canvas.nativeCanvas.drawText(
