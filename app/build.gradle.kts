@@ -70,13 +70,15 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // TradingView Lightweight Charts (official Android wrapper)
-    implementation("com.tradingview:lightweightcharts:5.2.1")
+    implementation("com.tradingview:lightweightcharts:5.2.0")
 
     // WebView enhancements
     implementation("androidx.webkit:webkit:1.9.0")
 }
 
 // Bypass AAR metadata check (e.g. for libraries declaring preview compileSdk)
-tasks.matching { it.name.contains("AarMetadata") }.configureEach {
-    enabled = false
+afterEvaluate {
+    tasks.matching { it.name.contains("AarMetadata") }.configureEach {
+        enabled = false
+    }
 }
