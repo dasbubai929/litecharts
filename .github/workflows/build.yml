@@ -38,19 +38,22 @@ jobs:
 
       - name: Build Debug APK with Gradle
         run: |
+          set -o pipefail
           ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee build.log
 
-      - name: Print failure log
-        if: failure()
+      - name: Display build log
+        if: always()
         run: |
-          echo "=== BUILD LOG FAILURE TAIL ==="
-          tail -n 150 build.log
+          echo "=== BUILD LOG (LAST 250 LINES) ==="
+          tail -n 250 build.log || true
+          echo "=== SEARCH APK OUTPUTS ==="
+          find app/build -name "*.apk" 2>/dev/null || true
 
-      - name: Upload Build Log on Failure
-        if: failure()
+      - name: Upload Build Log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-failure-log
+          name: build-log
           path: build.log
 
       - name: Upload Debug APK Artifact
@@ -58,4 +61,5 @@ jobs:
         with:
           name: LiteCharts-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
           retention-days: 14
