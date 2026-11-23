@@ -112,7 +112,7 @@ class ChartManager(private val chartsView: ChartsView) {
     fun setCandleData(candles: List<OandaCandle>) {
         val series = candleSeries ?: return
         val data = candles.map { c ->
-            CandlestickData(
+            BarData(
                 time  = Time.Utc(c.time),
                 open  = c.open.toFloat(),
                 high  = c.high.toFloat(),
