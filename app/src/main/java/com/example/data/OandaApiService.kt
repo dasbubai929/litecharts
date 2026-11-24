@@ -203,8 +203,16 @@ class OandaStreamingClient(
 internal fun parseOandaEpochSec(rawTime: String): Long {
     val value = rawTime.trim()
 
-    // Retain support for numeric Unix timestamps if supplied.
+    // Retain support for whole-second Unix timestamps.
     value.toLongOrNull()?.let { return it }
+
+    // OANDA can also return Unix seconds with fractional precision,
+    // for example 1795429500.000000000. Candle timestamps use seconds,
+    // so safely discard the fractional part.
+    if (Regex("""^\d+\.\d+$""").matches(value)) {
+        return value.substringBefore('.').toLongOrNull()
+            ?: throw IllegalArgumentException("Invalid OANDA Unix timestamp: $rawTime")
+    }
 
     // OANDA returns RFC3339/ISO-8601 UTC timestamps, usually with
     // fractional seconds such as .000000000Z. Candle precision here
