@@ -73,6 +73,7 @@ class ChartViewModel(
 
     private var allDrawingsByKey: Map<String, List<ChartDrawing>> = emptyMap()
     private var htfCandlesByTf: Map<Timeframe, List<Candle>> = emptyMap()
+    private var dailyCandlesForLevels: List<Candle> = emptyList()
     private var candlesJob: Job? = null
     private var streamJob: Job? = null
     private var recomputeJob: Job? = null
@@ -118,6 +119,7 @@ class ChartViewModel(
 
         val key = ChartPreferencesStore.chartStorageKey(instrument.id, current.selectedTimeframe)
         htfCandlesByTf = emptyMap()
+        dailyCandlesForLevels = emptyList()
         _uiState.update {
             it.copy(
                 selectedInstrument = instrument,
@@ -205,11 +207,19 @@ class ChartViewModel(
                     htfCandlesByTf
                 }
             }
+            val dailyDeferred = async {
+                repository.fetchDailyCandlesForLevels(instrument.id, count = 180)
+            }
 
             val mainResult = mainDeferred.await()
             val htfBundle = htfDeferred.await()
+            val dailyResult = dailyDeferred.await()
+
             if (htfBundle.isNotEmpty()) {
                 htfCandlesByTf = htfBundle
+            }
+            dailyResult.onSuccess { fetched ->
+                dailyCandlesForLevels = fetched
             }
 
             mainResult.fold(
@@ -220,7 +230,8 @@ class ChartViewModel(
                         instrument = instrument,
                         dccSettings = _uiState.value.dccSettings,
                         customIndicators = _uiState.value.customIndicators,
-                        htfMap = htfCandlesByTf
+                        htfMap = htfCandlesByTf,
+                        dailyCandles = dailyCandlesForLevels
                     )
                     _uiState.update { state ->
                         state.copy(
@@ -251,14 +262,16 @@ class ChartViewModel(
         instrument: MarketInstrument,
         dccSettings: DccSettings,
         customIndicators: List<CustomPineIndicator>,
-        htfMap: Map<Timeframe, List<Candle>>
+        htfMap: Map<Timeframe, List<Candle>>,
+        dailyCandles: List<Candle>
     ): Pair<DccMasterResult, List<PineEvaluationResult>> = withContext(Dispatchers.Default) {
         val dcc = DccMasterEngine.calculate(
             candles = candles,
             chartTimeframe = timeframe,
             instrument = instrument,
             settings = dccSettings,
-            htfCandles = htfMap
+            htfCandles = htfMap,
+            dailyCandlesForLevels = dailyCandles
         )
         val customResults = customIndicators
             .filter { it.enabled }
@@ -277,7 +290,8 @@ class ChartViewModel(
                 instrument = st.selectedInstrument,
                 dccSettings = st.dccSettings,
                 customIndicators = st.customIndicators,
-                htfMap = htfCandlesByTf
+                htfMap = htfCandlesByTf,
+                dailyCandles = dailyCandlesForLevels
             )
             _uiState.update { it.copy(dccResult = dcc, customResults = customRes) }
         }

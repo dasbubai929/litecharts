@@ -90,6 +90,55 @@ class OandaRepository(
     }
 
     /**
+     * Fetches native OANDA daily candles for DO/PDH/PDL and daily VWAP.
+     * Unlike the HTF bundle, this intentionally retains the current
+     * incomplete daily candle.
+     */
+    suspend fun fetchDailyCandlesForLevels(
+        instrument: String,
+        count: Int = 180
+    ): Result<List<Candle>> = withContext(Dispatchers.IO) {
+        if (!isApiKeyConfigured()) {
+            return@withContext Result.failure(
+                IllegalStateException("OANDA_API_KEY is not configured.")
+            )
+        }
+        runCatching {
+            val response = restApi.getCandles(
+                instrument = instrument,
+                price = "M",
+                granularity = Timeframe.D1.oandaGranularity,
+                count = count,
+                dailyAlignment = 17,
+                alignmentTimezone = "America/New_York"
+            )
+            response.candles
+                .asSequence()
+                .filter { it.mid != null }
+                .mapNotNull { dto ->
+                    val mid = dto.mid ?: return@mapNotNull null
+                    val o = mid.o.toDoubleOrNull() ?: return@mapNotNull null
+                    val h = mid.h.toDoubleOrNull() ?: return@mapNotNull null
+                    val l = mid.l.toDoubleOrNull() ?: return@mapNotNull null
+                    val c = mid.c.toDoubleOrNull() ?: return@mapNotNull null
+                    Candle(
+                        timeEpochSec = parseOandaEpochSec(dto.time),
+                        open = o,
+                        high = h,
+                        low = l,
+                        close = c,
+                        volume = dto.volume,
+                        isComplete = dto.complete
+                    )
+                }
+                .sortedBy { it.timeEpochSec }
+                .toList()
+        }.recoverCatching { err ->
+            throw mapReadableError(err)
+        }
+    }
+
+    /**
      * Fetches multiple higher timeframes concurrently for DCC Master
      * (HTF EMA 1, ADX, ATR SL, TSM HTF1/2/3, and Daily DO/PDH/PDL).
      */

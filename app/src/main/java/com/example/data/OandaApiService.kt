@@ -17,6 +17,10 @@ import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
 import java.io.IOException
+import java.text.ParsePosition
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 @JsonClass(generateAdapter = true)
@@ -79,7 +83,9 @@ interface OandaRestApi {
         @Path("instrument") instrument: String,
         @Query("price") price: String = "M",
         @Query("granularity") granularity: String,
-        @Query("count") count: Int = 250
+        @Query("count") count: Int = 250,
+        @Query("dailyAlignment") dailyAlignment: Int = 17,
+        @Query("alignmentTimezone") alignmentTimezone: String = "America/New_York"
     ): OandaCandlesResponse
 }
 
@@ -195,7 +201,29 @@ class OandaStreamingClient(
 }
 
 internal fun parseOandaEpochSec(rawTime: String): Long {
-    val beforeDot = rawTime.substringBefore('.').trim()
-    beforeDot.toLongOrNull()?.let { return it }
-    return System.currentTimeMillis() / 1000L
+    val value = rawTime.trim()
+
+    // Retain support for numeric Unix timestamps if supplied.
+    value.toLongOrNull()?.let { return it }
+
+    // OANDA returns RFC3339/ISO-8601 UTC timestamps, usually with
+    // fractional seconds such as .000000000Z. Candle precision here
+    // is one second, so the fractional part can safely be ignored.
+    val isoPrefix = Regex(
+        """^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$"""
+    )
+    require(isoPrefix.matches(value)) {
+        "Invalid OANDA timestamp: $rawTime"
+    }
+
+    val formatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+        isLenient = false
+        timeZone = TimeZone.getTimeZone("UTC")
+    }
+    val position = ParsePosition(0)
+    val parsed = formatter.parse(value.substring(0, 19), position)
+    require(parsed != null && position.index == 19) {
+        "Unable to parse OANDA timestamp: $rawTime"
+    }
+    return parsed.time / 1000L
 }

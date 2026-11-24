@@ -39,7 +39,7 @@ jobs:
       - name: Build Debug APK with Gradle
         run: |
           set -o pipefail
-          ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee build.log
+          ./gradlew testDebugUnitTest assembleDebug --stacktrace --no-daemon 2>&1 | tee build.log
 
       - name: Display build log on failure
         if: failure()

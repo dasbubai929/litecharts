@@ -61,6 +61,8 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+
     // Jetpack Compose BOM
     val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
     implementation(composeBom)

@@ -51,7 +51,8 @@ object DccMasterEngine {
         chartTimeframe: Timeframe,
         instrument: MarketInstrument,
         settings: DccSettings,
-        htfCandles: Map<Timeframe, List<Candle>>
+        htfCandles: Map<Timeframe, List<Candle>>,
+        dailyCandlesForLevels: List<Candle> = emptyList()
     ): DccMasterResult {
         if (!settings.masterEnabled || candles.isEmpty()) return DccMasterResult()
 
@@ -88,7 +89,11 @@ object DccMasterEngine {
 
         // --- 02 • VWAP (DAILY OR SESSION ANCHORED — OVERLAP SAFE) ---
         val vwapSrc = PineTa.sourceSeries(candles, settings.vwapSource)
-        val (dailyVwapArr, dailyBreaks) = PineTa.dailyVwap(candles, vwapSrc)
+        val (dailyVwapArr, dailyBreaks) = PineTa.dailyVwap(
+            candles,
+            vwapSrc,
+            dailyCandlesForLevels
+        )
 
         val sessionVwapArr = DoubleArray(n) { Double.NaN }
         val sessionBreaks = BooleanArray(n)
@@ -534,10 +539,21 @@ object DccMasterEngine {
         // --- 09 • KEY LEVELS (DO / PDH / PDL) ---
         val keyLevels = mutableListOf<DccKeyLevel>()
         if (settings.enableLevels) {
-            val dailyCandles = htfCandles[Timeframe.D1].orEmpty()
-            if (dailyCandles.size >= 2) {
-                val curDay = dailyCandles.last()
-                val prevDay = dailyCandles[dailyCandles.lastIndex - 1]
+            val dailyCandles = dailyCandlesForLevels
+                .ifEmpty { htfCandles[Timeframe.D1].orEmpty() }
+                .sortedBy { it.timeEpochSec }
+
+            // Select the daily candle active at the last chart candle.
+            // This includes today's incomplete D1 candle when available.
+            val chartLastTime = candles.last().timeEpochSec
+            val currentDayIndex = dailyCandles.indexOfLast {
+                it.timeEpochSec <= chartLastTime
+            }
+
+            if (currentDayIndex > 0) {
+                val curDay = dailyCandles[currentDayIndex]
+                val prevDay = dailyCandles[currentDayIndex - 1]
+
                 if (settings.showDailyOpen) {
                     keyLevels.add(
                         DccKeyLevel(

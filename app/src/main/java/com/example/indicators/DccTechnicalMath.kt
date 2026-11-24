@@ -394,25 +394,92 @@ object PineTa {
         return out
     }
 
-    fun dailyVwap(candles: List<Candle>, src: DoubleArray): Pair<DoubleArray, BooleanArray> {
+    // Compatibility overload: retained for custom Pine indicators.
+    // Without native D1 candles, this keeps the previous UTC-day behavior.
+    fun dailyVwap(
+        candles: List<Candle>,
+        src: DoubleArray
+    ): Pair<DoubleArray, BooleanArray> = dailyVwap(candles, src, emptyList())
+
+    /**
+     * Daily VWAP anchored to native OANDA D1 candle start timestamps.
+     * D1 candles are aligned to 17:00 America/New_York by the repository.
+     */
+    fun dailyVwap(
+        candles: List<Candle>,
+        src: DoubleArray,
+        dailyCandles: List<Candle>
+    ): Pair<DoubleArray, BooleanArray> {
+        val n = candles.size
+        val out = DoubleArray(n) { Double.NaN }
+        val breaks = BooleanArray(n)
+
+        if (dailyCandles.isEmpty()) {
+            return dailyVwapUtcFallback(candles, src)
+        }
+
+        var cumPV = 0.0
+        var cumV = 0.0
+        var dailyIndex = -1
+        var activeBucket = Long.MIN_VALUE
+
+        for (i in 0 until n) {
+            val candleTime = candles[i].timeEpochSec
+
+            while (
+                dailyIndex + 1 < dailyCandles.size &&
+                dailyCandles[dailyIndex + 1].timeEpochSec <= candleTime
+            ) {
+                dailyIndex++
+            }
+
+            // Native D1 start time is the bucket identity. For chart history
+            // older than the supplied D1 series, use the legacy UTC fallback.
+            val bucket = if (dailyIndex >= 0) {
+                dailyCandles[dailyIndex].timeEpochSec
+            } else {
+                -(candleTime / 86_400L + 1L)
+            }
+
+            val isNewDay = activeBucket != Long.MIN_VALUE && bucket != activeBucket
+            if (activeBucket == Long.MIN_VALUE || isNewDay) {
+                cumPV = 0.0
+                cumV = 0.0
+                if (isNewDay) breaks[i] = true
+            }
+            activeBucket = bucket
+
+            val volume = max(candles[i].volume.toDouble(), 1.0)
+            cumPV += src[i] * volume
+            cumV += volume
+            out[i] = if (cumV > 0.0) cumPV / cumV else candles[i].close
+        }
+        return out to breaks
+    }
+
+    private fun dailyVwapUtcFallback(
+        candles: List<Candle>,
+        src: DoubleArray
+    ): Pair<DoubleArray, BooleanArray> {
         val n = candles.size
         val out = DoubleArray(n) { Double.NaN }
         val breaks = BooleanArray(n)
         var cumPV = 0.0
         var cumV = 0.0
-        var prevDay = -1L
+        var previousDay = Long.MIN_VALUE
+
         for (i in 0 until n) {
             val day = candles[i].timeEpochSec / 86_400L
-            val isNewDay = prevDay != -1L && day != prevDay
-            if (isNewDay || prevDay == -1L) {
+            val isNewDay = previousDay != Long.MIN_VALUE && day != previousDay
+            if (previousDay == Long.MIN_VALUE || isNewDay) {
                 cumPV = 0.0
                 cumV = 0.0
                 if (isNewDay) breaks[i] = true
             }
-            prevDay = day
-            val v = max(candles[i].volume.toDouble(), 1.0)
-            cumPV += src[i] * v
-            cumV += v
+            previousDay = day
+            val volume = max(candles[i].volume.toDouble(), 1.0)
+            cumPV += src[i] * volume
+            cumV += volume
             out[i] = if (cumV > 0.0) cumPV / cumV else candles[i].close
         }
         return out to breaks
