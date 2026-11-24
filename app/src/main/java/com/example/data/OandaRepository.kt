@@ -1,5 +1,11 @@
 package com.example.data
 
+import android.util.Log
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+
 import com.example.BuildConfig
 import com.example.model.Candle
 import com.example.model.Timeframe
@@ -112,6 +118,29 @@ class OandaRepository(
                 dailyAlignment = 17,
                 alignmentTimezone = "America/New_York"
             )
+
+            // TEMPORARY D1 diagnostics: inspect OANDA's actual candle boundaries.
+            val utcFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val istFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("Asia/Kolkata")
+            }
+
+            response.candles.takeLast(10).forEach { dto ->
+                val epoch = runCatching { parseOandaEpochSec(dto.time) }.getOrNull()
+                val timestamp = epoch?.let { Date(it * 1000L) }
+                Log.i(
+                    "LiteChartsD1",
+                    "instrument=$instrument rawTime=${dto.time} " +
+                        "UTC=${timestamp?.let { utcFormat.format(it) }} " +
+                        "IST=${timestamp?.let { istFormat.format(it) }} " +
+                        "O=${dto.mid?.o} H=${dto.mid?.h} " +
+                        "L=${dto.mid?.l} C=${dto.mid?.c} " +
+                        "volume=${dto.volume} complete=${dto.complete}"
+                )
+            }
+
             response.candles
                 .asSequence()
                 .filter { it.mid != null }
